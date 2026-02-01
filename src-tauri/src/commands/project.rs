@@ -1,0 +1,140 @@
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::{Path, PathBuf};
+use tauri::{AppHandle, Emitter};
+use walkdir::WalkDir;
+
+use super::ratings::{load_ratings, ImageRating};
+
+const PROGRESS_EVENT: &str = "project-load-progress";
+
+const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "webp", "gif", "bmp"];
+
+fn is_image_path(path: &Path) -> bool {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase());
+    ext.as_ref()
+        .map(|e| IMAGE_EXTENSIONS.contains(&e.as_str()))
+        .unwrap_or(false)
+}
+
+/// Get the caption file path for an image (same name, .txt extension).
+fn caption_path_for(image_path: &Path) -> PathBuf {
+    image_path.with_extension("txt")
+}
+
+/// Parse comma-separated tags from raw caption text.
+fn parse_tags(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OpenProjectPayload {
+    pub root_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ImageEntry {
+    pub id: String,
+    pub path: String,
+    pub relative_path: String,
+    pub filename: String,
+    pub has_caption: bool,
+    pub tags: Vec<String>,
+    pub rating: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProjectLoadProgress {
+    count: usize,
+}
+
+/// Opens a project at the given root path. Scans recursively for image files.
+/// Emits progress events as images are discovered.
+#[tauri::command]
+pub fn open_project(app: AppHandle, payload: OpenProjectPayload) -> Result<Vec<ImageEntry>, String> {
+    let root = PathBuf::from(&payload.root_path);
+    if !root.exists() {
+        return Err("Folder does not exist".to_string());
+    }
+    if !root.is_dir() {
+        return Err("Path is not a folder".to_string());
+    }
+
+    let canonical_root = root.canonicalize().map_err(|e| e.to_string())?;
+    let ratings_data = load_ratings(&payload.root_path);
+    let mut entries = Vec::new();
+
+    for entry in WalkDir::new(&root)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        let path = entry.path();
+        if !path.is_file() || !is_image_path(path) {
+            continue;
+        }
+        let path_buf = path.to_path_buf();
+        let path_str = path_buf
+            .to_str()
+            .ok_or("Invalid path encoding")?
+            .to_string();
+        let relative = path_buf
+            .strip_prefix(&canonical_root)
+            .unwrap_or(&path_buf);
+        let relative_path = relative
+            .to_str()
+            .ok_or("Invalid path encoding")?
+            .replace('\\', "/");
+        let filename = path_buf
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+        let id = path_str.clone();
+
+        // Read caption file if exists
+        let caption_path = caption_path_for(&path_buf);
+        let (has_caption, tags) = if caption_path.exists() {
+            match fs::read_to_string(&caption_path) {
+                Ok(raw) => (true, parse_tags(&raw)),
+                Err(_) => (false, Vec::new()),
+            }
+        } else {
+            (false, Vec::new())
+        };
+
+        // Get rating from loaded ratings data
+        let rating = ratings_data
+            .ratings
+            .get(&relative_path)
+            .map(|s| ImageRating::from_str(s))
+            .unwrap_or(ImageRating::None);
+
+        entries.push(ImageEntry {
+            id,
+            path: path_str,
+            relative_path,
+            filename,
+            has_caption,
+            tags,
+            rating: rating.as_str().to_string(),
+        });
+
+        // Emit progress every 50 images
+        if entries.len() % 50 == 0 {
+            let _ = app.emit(PROGRESS_EVENT, ProjectLoadProgress { count: entries.len() });
+        }
+    }
+
+    // Emit final count
+    let _ = app.emit(PROGRESS_EVENT, ProjectLoadProgress { count: entries.len() });
+
+    entries.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
+    Ok(entries)
+}

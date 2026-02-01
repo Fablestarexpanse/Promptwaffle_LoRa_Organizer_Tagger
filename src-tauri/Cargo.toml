@@ -1,0 +1,28 @@
+[package]
+name = "lora-dataset-studio"
+version = "0.1.0"
+description = "LoRA Dataset Studio - Prepare image datasets for AI model training"
+authors = ["PromptWaffle"]
+license = "MIT"
+repository = "https://github.com/Fablestarexpanse/Joycaption_Mobile_LoRa_Organizer"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+walkdir = "2"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
+base64 = "0.22"
+reqwest = { version = "0.12", features = ["json"] }
+tokio = { version = "1", features = ["process", "io-util", "macros", "rt"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
