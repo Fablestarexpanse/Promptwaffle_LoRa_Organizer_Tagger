@@ -9,12 +9,13 @@ import {
   Loader2,
   Check,
   X,
-  Settings,
   Download,
+  Trash2,
   CheckCircle,
   Square,
 } from "lucide-react";
 import { useAiStore } from "@/stores/aiStore";
+import { useUiStore } from "@/stores/uiStore";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useProjectStore } from "@/stores/projectStore";
 import { useProjectImages } from "@/hooks/useProject";
@@ -29,12 +30,15 @@ import {
   writeCaption,
   joycaptionInstallStatus,
   joycaptionInstall,
+  joycaptionUninstall,
+  joycaptionDiagnose,
   type JoyCaptionInstallProgress,
 } from "@/lib/tauri";
 
 export function AiPanel() {
-  const [showSettings, setShowSettings] = useState(false);
   const [previewCaption, setPreviewCaption] = useState<string | null>(null);
+  const [diagnoseResult, setDiagnoseResult] = useState<Awaited<ReturnType<typeof joycaptionDiagnose>> | null>(null);
+  const [showUninstallConfirm, setShowUninstallConfirm] = useState(false);
   const cancelBatchRef = useRef(false);
 
   const queryClient = useQueryClient();
@@ -71,9 +75,14 @@ export function AiPanel() {
     setIsGenerating,
     generationProgress,
     setGenerationProgress,
+    batchCaptionRatingFilter,
+    batchCaptionRatingAll,
+    setBatchCaptionRatingAll,
+    toggleBatchCaptionRating,
   } = useAiStore();
 
   const selectedIds = useSelectionStore((s) => s.selectedIds);
+  const showToast = useUiStore((s) => s.showToast);
 
   const [installProgress, setInstallProgress] = useState<JoyCaptionInstallProgress | null>(null);
 
@@ -122,6 +131,46 @@ export function AiPanel() {
     onError: () => setInstallProgress(null),
   });
 
+  // JoyCaption uninstall
+  const uninstallJoyCaptionMutation = useMutation({
+    mutationFn: joycaptionUninstall,
+    onSuccess: (result) => {
+      setShowUninstallConfirm(false);
+      if (result.success) {
+        showToast(result.message);
+        refetchJoyCaptionStatus();
+      } else {
+        showToast(result.message);
+      }
+    },
+    onError: (err) => {
+      setShowUninstallConfirm(false);
+      showToast(String(err));
+    },
+  });
+
+  // JoyCaption diagnostic test (paths passed when invoking)
+  const diagnoseMutation = useMutation({
+    mutationFn: ({
+      pythonPath,
+      scriptPath,
+    }: {
+      pythonPath: string;
+      scriptPath: string;
+    }) => joycaptionDiagnose(pythonPath, scriptPath),
+    onSuccess: (result) => setDiagnoseResult(result),
+    onError: (err) =>
+      setDiagnoseResult({
+        ok: false,
+        python_exists: false,
+        script_exists: false,
+        stdout: "",
+        stderr: "",
+        exit_code: null,
+        error: String(err),
+      }),
+  });
+
   // Test connection mutation (LM Studio or Ollama)
   const testConnectionMutation = useMutation({
     mutationFn: () =>
@@ -142,6 +191,16 @@ export function AiPanel() {
 
   // Get the effective prompt to use
   const effectivePrompt = customPrompt.trim() || selectedTemplate?.prompt || "Describe this image.";
+
+  // Use install-status paths when JoyCaption is installed (fixes "doing nothing" when store has wrong paths)
+  const joyCaptionPython =
+    joyCaptionInstallStatusData?.installed && joyCaptionInstallStatusData?.python_path
+      ? joyCaptionInstallStatusData.python_path
+      : joyCaption.python_path;
+  const joyCaptionScript =
+    joyCaptionInstallStatusData?.installed && joyCaptionInstallStatusData?.script_path
+      ? joyCaptionInstallStatusData.script_path
+      : joyCaption.script_path;
 
   // Generate single caption mutation
   const generateSingleMutation = useMutation({
@@ -173,8 +232,8 @@ export function AiPanel() {
         );
         const joyResult = await generateCaptionJoyCaption(
           selectedImage.path,
-          joyCaption.python_path,
-          joyCaption.script_path,
+          joyCaptionPython,
+          joyCaptionScript,
           joyCaption.mode,
           joyCaption.low_vram
         );
@@ -185,8 +244,8 @@ export function AiPanel() {
       }
       return generateCaptionJoyCaption(
         selectedImage.path,
-        joyCaption.python_path,
-        joyCaption.script_path,
+        joyCaptionPython,
+        joyCaptionScript,
         joyCaption.mode,
         joyCaption.low_vram
       );
@@ -194,7 +253,12 @@ export function AiPanel() {
     onSuccess: (result) => {
       if (result?.success) {
         setPreviewCaption(result.caption);
+      } else if (result?.error) {
+        showToast(result.error);
       }
+    },
+    onError: (err: Error) => {
+      showToast(err.message);
     },
   });
 
@@ -213,14 +277,27 @@ export function AiPanel() {
   }
 
   // Batch generation - uses selected images if any, otherwise uncaptioned
+  // When rating filter is set, only process images with those ratings
   async function handleBatchGenerate() {
-    // Determine which images to process
-    const targetImages =
-      selectedIds.size > 0
-        ? images.filter((img) => selectedIds.has(img.id))
-        : images.filter((img) => !img.has_caption);
+    let baseImages: typeof images;
+    if (batchCaptionRatingAll) {
+      baseImages = images;
+    } else if (batchCaptionRatingFilter.size > 0) {
+      baseImages = images.filter((img) =>
+        batchCaptionRatingFilter.has(img.rating)
+      );
+    } else {
+      baseImages =
+        selectedIds.size > 0
+          ? images.filter((img) => selectedIds.has(img.id))
+          : images.filter((img) => !img.has_caption);
+    }
+    const targetImages = baseImages;
 
-    if (targetImages.length === 0) return;
+    if (targetImages.length === 0) {
+      showToast("No images to caption. Select images, check All, or pick Good/Bad/Needs Edit.");
+      return;
+    }
 
     setIsGenerating(true);
     setGenerationProgress(0, targetImages.length);
@@ -229,29 +306,33 @@ export function AiPanel() {
     try {
       if (provider === "wd14" || provider === "hybrid") {
         // WD14 and Hybrid: no batch API, process one image at a time
-        for (let i = 0; i < targetImages.length; i++) {
+          for (let i = 0; i < targetImages.length; i++) {
           if (cancelBatchRef.current) break;
           const img = targetImages[i];
-          let caption = "";
-          if (provider === "wd14") {
-            const result = await generateCaptionWd14(img.path, wd14.python_path, wd14.script_path);
-            if (result.success && result.caption) caption = result.caption;
-          } else {
-            const wd14Result = await generateCaptionWd14(img.path, wd14.python_path, wd14.script_path);
-            const joyResult = await generateCaptionJoyCaption(
-              img.path,
-              joyCaption.python_path,
-              joyCaption.script_path,
-              joyCaption.mode,
-              joyCaption.low_vram
-            );
-            const wd14Tags = wd14Result.success && wd14Result.caption ? wd14Result.caption.trim() : "";
-            const joyText = joyResult.success && joyResult.caption ? joyResult.caption.trim() : "";
-            caption = [wd14Tags, joyText].filter(Boolean).join(", ");
-          }
-          if (caption) {
-            const tags = caption.split(",").map((t) => t.trim()).filter((t) => t);
-            await writeCaption(img.path, tags);
+          try {
+            let caption = "";
+            if (provider === "wd14") {
+              const result = await generateCaptionWd14(img.path, wd14.python_path, wd14.script_path);
+              if (result.success && result.caption) caption = result.caption;
+            } else {
+              const wd14Result = await generateCaptionWd14(img.path, wd14.python_path, wd14.script_path);
+              const joyResult = await generateCaptionJoyCaption(
+                img.path,
+                joyCaptionPython,
+                joyCaptionScript,
+                joyCaption.mode,
+                joyCaption.low_vram
+              );
+              const wd14Tags = wd14Result.success && wd14Result.caption ? wd14Result.caption.trim() : "";
+              const joyText = joyResult.success && joyResult.caption ? joyResult.caption.trim() : "";
+              caption = [wd14Tags, joyText].filter(Boolean).join(", ");
+            }
+            if (caption) {
+              const tags = caption.split(",").map((t) => t.trim()).filter((t) => t);
+              await writeCaption(img.path, tags);
+            }
+          } catch (e) {
+            showToast(String(e instanceof Error ? e.message : e));
           }
           setGenerationProgress(i + 1, targetImages.length);
         }
@@ -276,13 +357,15 @@ export function AiPanel() {
           } else {
             results = await generateCaptionsJoyCaptionBatch(
               paths,
-              joyCaption.python_path,
-              joyCaption.script_path,
+              joyCaptionPython,
+              joyCaptionScript,
               joyCaption.mode,
               joyCaption.low_vram
             );
           }
 
+          let failed = 0;
+          let firstError: string | null = null;
           for (const result of results) {
             if (result.success && result.caption) {
               const tags = result.caption
@@ -290,12 +373,23 @@ export function AiPanel() {
                 .map((t) => t.trim())
                 .filter((t) => t);
               await writeCaption(result.path, tags);
+            } else {
+              failed++;
+              if (!firstError && result.error) firstError = result.error;
             }
+          }
+
+          if (failed > 0 && firstError) {
+            showToast(
+              `${failed} of ${results.length} failed: ${firstError.slice(0, 200)}${firstError.length > 200 ? "…" : ""}`
+            );
           }
 
           setGenerationProgress(Math.min(i + chunkSize, targetImages.length), targetImages.length);
         }
       }
+    } catch (err) {
+      showToast(String(err instanceof Error ? err.message : err));
     } finally {
       cancelBatchRef.current = false;
       setIsGenerating(false);
@@ -310,8 +404,29 @@ export function AiPanel() {
   }
 
   const uncaptionedCount = images.filter((img) => !img.has_caption).length;
-  const batchTargetCount = selectedIds.size > 0 ? selectedIds.size : uncaptionedCount;
-  const batchLabel = selectedIds.size > 0 ? `${selectedIds.size} selected` : `${uncaptionedCount} uncaptioned`;
+  let batchTargetImages: typeof images;
+  if (batchCaptionRatingAll) {
+    batchTargetImages = images;
+  } else if (batchCaptionRatingFilter.size > 0) {
+    // Good/Bad/Needs Edit = all images with those ratings
+    batchTargetImages = images.filter((img) =>
+      batchCaptionRatingFilter.has(img.rating)
+    );
+  } else {
+    batchTargetImages =
+      selectedIds.size > 0
+        ? images.filter((img) => selectedIds.has(img.id))
+        : images.filter((img) => !img.has_caption);
+  }
+  const batchTargetCount = batchTargetImages.length;
+  const batchLabel =
+    batchCaptionRatingAll
+      ? `${batchTargetCount} (all)`
+      : batchCaptionRatingFilter.size > 0
+        ? `${batchTargetCount} (rating filter)`
+        : selectedIds.size > 0
+          ? `${selectedIds.size} selected`
+          : `${uncaptionedCount} uncaptioned`;
 
   return (
     <div className="flex flex-col border-t border-border">
@@ -321,21 +436,12 @@ export function AiPanel() {
           <Sparkles className="h-4 w-4 text-purple-400" />
           <span className="text-sm font-medium text-gray-200">AI Captioning</span>
         </div>
-        <div className="flex items-center gap-2">
-          {(provider === "lm_studio" || provider === "ollama") &&
-            (isConnected ? (
-              <Wifi className="h-4 w-4 text-green-400" />
-            ) : (
-              <WifiOff className="h-4 w-4 text-gray-500" />
-            ))}
-          <button
-            type="button"
-            onClick={() => setShowSettings(!showSettings)}
-            className="rounded p-1 text-gray-400 hover:bg-white/10 hover:text-gray-200"
-          >
-            <Settings className="h-4 w-4" />
-          </button>
-        </div>
+        {(provider === "lm_studio" || provider === "ollama") &&
+          (isConnected ? (
+            <Wifi className="h-4 w-4 text-green-400" />
+          ) : (
+            <WifiOff className="h-4 w-4 text-gray-500" />
+          ))}
       </div>
 
       {/* Provider selector */}
@@ -400,10 +506,9 @@ export function AiPanel() {
         </div>
       </div>
 
-      {/* Settings (collapsible) */}
-      {showSettings && (
-        <div className="space-y-3 border-b border-border bg-surface/50 p-3">
-          {provider === "lm_studio" ? (
+      {/* Provider-specific settings (inline when provider selected) */}
+      <div className="space-y-3 border-b border-border bg-surface/50 p-3">
+        {provider === "lm_studio" ? (
             <>
               {/* LM Studio URL */}
               <div>
@@ -445,7 +550,7 @@ export function AiPanel() {
                 </div>
               )}
             </>
-          ) : provider === "ollama" ? (
+        ) : provider === "ollama" ? (
             <>
               {/* Ollama URL */}
               <div>
@@ -487,7 +592,7 @@ export function AiPanel() {
                 </div>
               )}
             </>
-          ) : provider === "wd14" ? (
+        ) : provider === "wd14" ? (
             <>
               <div>
                 <label className="mb-1 block text-xs text-gray-500">Python Path</label>
@@ -513,7 +618,7 @@ export function AiPanel() {
                 </p>
               </div>
             </>
-          ) : provider === "hybrid" ? (
+        ) : provider === "hybrid" ? (
             <>
               <p className="text-xs text-gray-500">Hybrid uses WD14 (tags) + JoyCaption (description).</p>
               <div>
@@ -557,7 +662,7 @@ export function AiPanel() {
                 </select>
               </div>
             </>
-          ) : (
+        ) : provider === "joycaption" ? (
             <>
               {/* JoyCaption Python Path */}
               <div>
@@ -568,6 +673,16 @@ export function AiPanel() {
                   onChange={(e) => setJoyCaptionPythonPath(e.target.value)}
                   className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-gray-200"
                   placeholder="python"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-gray-500">Script Path (optional, uses Install if blank)</label>
+                <input
+                  type="text"
+                  value={joyCaption.script_path ?? ""}
+                  onChange={(e) => setJoyCaptionScriptPath(e.target.value || null)}
+                  className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-gray-200"
+                  placeholder="path/to/joycaption_inference.py"
                 />
               </div>
 
@@ -597,9 +712,8 @@ export function AiPanel() {
                 <span className="text-sm text-gray-300">Low VRAM mode</span>
               </label>
             </>
-          )}
+          ) : null}
         </div>
-      )}
 
       {/* Prompt template selector (LM Studio and Ollama) */}
       {(provider === "lm_studio" || provider === "ollama") && (
@@ -643,6 +757,48 @@ export function AiPanel() {
         )}
       </div>
 
+      {/* Batch captioning: rating filter */}
+      <div className="border-b border-border p-3">
+        <label className="mb-1 block text-xs text-gray-500">
+          Only caption images rated:
+        </label>
+        <div className="flex flex-wrap gap-2">
+          <label
+            className={`flex cursor-pointer items-center gap-1.5 rounded border px-2 py-1.5 text-xs hover:bg-white/5 ${
+              batchCaptionRatingAll
+                ? "border-green-500 bg-green-500/20 text-green-300"
+                : "border-border bg-surface text-gray-300"
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={batchCaptionRatingAll}
+              onChange={(e) => setBatchCaptionRatingAll(e.target.checked)}
+              className="rounded border-gray-600"
+            />
+            <span>All</span>
+          </label>
+          {(["good", "bad", "needs_edit"] as const).map((r) => (
+            <label
+              key={r}
+              className="flex cursor-pointer items-center gap-1.5 rounded border border-border bg-surface px-2 py-1.5 text-xs text-gray-300 hover:bg-white/5"
+            >
+              <input
+                type="checkbox"
+                checked={!batchCaptionRatingAll && batchCaptionRatingFilter.has(r)}
+                onChange={() => toggleBatchCaptionRating(r)}
+                disabled={batchCaptionRatingAll}
+                className="rounded border-gray-600 disabled:opacity-50"
+              />
+              <span className="capitalize">{r.replace("_", " ")}</span>
+            </label>
+          ))}
+        </div>
+        <p className="mt-1 text-[10px] text-gray-500">
+          All = every image in project (re-caption). Otherwise: selected/uncaptioned + rating.
+        </p>
+      </div>
+
       {/* Actions */}
       <div className="space-y-2 p-3">
         {/* Single image caption */}
@@ -669,18 +825,30 @@ export function AiPanel() {
 
         {/* Batch caption / Stop */}
         {isGenerating ? (
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={handleStopCaptioning}
-              className="flex flex-1 items-center justify-center gap-2 rounded bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500"
-            >
-              <Square className="h-4 w-4" />
-              Stop
-            </button>
-            <span className="flex items-center justify-center px-3 py-2 text-sm text-gray-400">
-              {generationProgress.current}/{generationProgress.total}
-            </span>
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleStopCaptioning}
+                className="flex flex-1 items-center justify-center gap-2 rounded bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500"
+              >
+                <Square className="h-4 w-4" />
+                Stop
+              </button>
+              <span className="flex items-center justify-center px-3 py-2 text-sm font-medium text-gray-300">
+                {generationProgress.current}/{generationProgress.total}
+              </span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-gray-700">
+              <div
+                className="h-full bg-purple-600 transition-all duration-300"
+                style={{
+                  width: generationProgress.total
+                    ? `${(100 * generationProgress.current) / generationProgress.total}%`
+                    : "0%",
+                }}
+              />
+            </div>
           </div>
         ) : (
           <button
@@ -731,7 +899,7 @@ export function AiPanel() {
       {provider === "lm_studio" && !isConnected && (
         <div className="p-3 text-center">
           <p className="text-xs text-gray-500">
-            Start LM Studio and load a vision model, then click Settings → Test
+            Start LM Studio, load a vision model, then click Test above
           </p>
         </div>
       )}
@@ -739,7 +907,7 @@ export function AiPanel() {
       {provider === "ollama" && !isConnected && (
         <div className="p-3 text-center">
           <p className="text-xs text-gray-500">
-            Start Ollama and pull a vision model (e.g. llava), then click Settings → Test
+            Start Ollama, pull a vision model (e.g. llava), then click Test above
           </p>
         </div>
       )}
@@ -747,9 +915,42 @@ export function AiPanel() {
       {provider === "joycaption" && (
         <div className="space-y-2 border-t border-border p-3">
           {joyCaptionInstallStatusData?.installed === true ? (
-            <div className="flex items-center justify-center gap-2 rounded bg-green-900/40 py-2 text-sm text-green-300">
-              <CheckCircle className="h-4 w-4 shrink-0" />
-              <span>JoyCaption is installed and ready.</span>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-center gap-2 rounded bg-green-900/40 py-2 text-sm text-green-300">
+                <CheckCircle className="h-4 w-4 shrink-0" />
+                <span>JoyCaption is installed and ready.</span>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    joyCaptionPython &&
+                    joyCaptionScript &&
+                    diagnoseMutation.mutate({
+                      pythonPath: joyCaptionPython,
+                      scriptPath: joyCaptionScript,
+                    })
+                  }
+                  disabled={!joyCaptionScript || !joyCaptionPython || diagnoseMutation.isPending}
+                  className="flex flex-1 items-center justify-center gap-2 rounded border border-border bg-surface px-3 py-2 text-sm text-gray-300 hover:bg-white/5 disabled:opacity-50"
+                >
+                  {diagnoseMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Play className="h-4 w-4" />
+                  )}
+                  Test
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowUninstallConfirm(true)}
+                  disabled={uninstallJoyCaptionMutation.isPending}
+                  className="flex flex-1 items-center justify-center gap-2 rounded border border-red-900/50 bg-red-900/20 px-3 py-2 text-sm text-red-400 hover:bg-red-900/40 disabled:opacity-50"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Uninstall
+                </button>
+              </div>
             </div>
           ) : installProgress ? (
             <div className="space-y-2 rounded bg-surface/80 p-3">
@@ -789,6 +990,111 @@ export function AiPanel() {
               )}
             </>
           )}
+        </div>
+      )}
+
+      {/* JoyCaption uninstall confirmation */}
+      {showUninstallConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="uninstall-title"
+        >
+          <div className="w-full max-w-sm rounded-lg border border-border bg-surface-elevated shadow-xl p-4">
+            <h2 id="uninstall-title" className="flex items-center gap-2 text-lg font-medium text-gray-100 mb-2">
+              <Trash2 className="h-5 w-5 text-red-400" />
+              Uninstall JoyCaption?
+            </h2>
+            <p className="text-sm text-gray-400 mb-4">
+              This will remove the JoyCaption venv and script. You can reinstall anytime. The downloaded model cache stays in Hugging Face cache.
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setShowUninstallConfirm(false)}
+                className="flex-1 rounded border border-border bg-surface px-3 py-2 text-sm text-gray-300 hover:bg-gray-600"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => uninstallJoyCaptionMutation.mutate()}
+                disabled={uninstallJoyCaptionMutation.isPending}
+                className="flex-1 rounded bg-red-600 px-3 py-2 text-sm text-white hover:bg-red-500 disabled:opacity-50"
+              >
+                {uninstallJoyCaptionMutation.isPending ? "Uninstalling…" : "Uninstall"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* JoyCaption diagnose result modal */}
+      {diagnoseResult !== null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="diagnose-title"
+        >
+          <div className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-lg border border-border bg-surface-elevated shadow-xl">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <h2
+                id="diagnose-title"
+                className="flex items-center gap-2 text-lg font-medium text-gray-100"
+              >
+                {diagnoseResult.ok ? (
+                  <CheckCircle className="h-5 w-5 text-green-400" />
+                ) : (
+                  <X className="h-5 w-5 text-red-400" />
+                )}
+                JoyCaption Test {diagnoseResult.ok ? "OK" : "Failed"}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setDiagnoseResult(null)}
+                aria-label="Close"
+                className="rounded p-1 text-gray-400 hover:bg-white/10 hover:text-gray-200"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-4 space-y-3 text-sm">
+              <div className="flex gap-4">
+                <span className={diagnoseResult.python_exists ? "text-green-400" : "text-red-400"}>
+                  Python: {diagnoseResult.python_exists ? "OK" : "Not found"}
+                </span>
+                <span className={diagnoseResult.script_exists ? "text-green-400" : "text-red-400"}>
+                  Script: {diagnoseResult.script_exists ? "OK" : "Not found"}
+                </span>
+              </div>
+              {diagnoseResult.error && (
+                <div>
+                  <p className="mb-1 text-xs text-gray-500">Error</p>
+                  <pre className="max-h-32 overflow-auto rounded bg-gray-900 p-2 text-red-300 whitespace-pre-wrap break-words text-xs">
+                    {diagnoseResult.error}
+                  </pre>
+                </div>
+              )}
+              {diagnoseResult.stdout && (
+                <div>
+                  <p className="mb-1 text-xs text-gray-500">Output</p>
+                  <pre className="max-h-32 overflow-auto rounded bg-gray-900 p-2 text-gray-300 whitespace-pre-wrap break-words text-xs">
+                    {diagnoseResult.stdout}
+                  </pre>
+                </div>
+              )}
+              {diagnoseResult.stderr && (
+                <div>
+                  <p className="mb-1 text-xs text-gray-500">Stderr</p>
+                  <pre className="max-h-32 overflow-auto rounded bg-gray-900 p-2 text-amber-300 whitespace-pre-wrap break-words text-xs">
+                    {diagnoseResult.stderr}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

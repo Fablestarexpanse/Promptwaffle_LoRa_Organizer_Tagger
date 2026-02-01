@@ -1,17 +1,21 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Folder, Replace, RotateCcw, Loader2, HelpCircle, Tag, Lock, Unlock } from "lucide-react";
+import { Folder, Replace, RotateCcw, Loader2, HelpCircle, Tag, Lock, Unlock, Copy, BarChart3 } from "lucide-react";
 import { useProjectStore } from "@/stores/projectStore";
 import { useProjectImages } from "@/hooks/useProject";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useSearchReplaceStore } from "@/stores/searchReplaceStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useUiStore } from "@/stores/uiStore";
 import { writeCaption } from "@/lib/tauri";
 import { useMemo } from "react";
+import { FindDuplicatesModal } from "../project/FindDuplicatesModal";
+import { DatasetStatsModal } from "../project/DatasetStatsModal";
 
 export function Sidebar() {
   const rootPath = useProjectStore((s) => s.rootPath);
   const { data: images = [] } = useProjectImages();
+  const showToast = useUiStore((s) => s.showToast);
   const selectedIds = useSelectionStore((s) => s.selectedIds);
   const queryClient = useQueryClient();
 
@@ -28,6 +32,8 @@ export function Sidebar() {
   const [addTagToAllText, setAddTagToAllText] = useState("");
   const [addTagAtFront, setAddTagAtFront] = useState(true);
   const [addTagResult, setAddTagResult] = useState<string | null>(null);
+  const [showFindDuplicates, setShowFindDuplicates] = useState(false);
+  const [showDatasetStats, setShowDatasetStats] = useState(false);
 
   const {
     lastBatch,
@@ -167,6 +173,26 @@ export function Sidebar() {
     };
   }, [triggerWord, previousTriggerWord, triggerWordLocked, rootPath, images.length, applyTriggerWordMutation]);
 
+  const createEmptyCaptionsMutation = useMutation({
+    mutationFn: async () => {
+      const uncaptioned = images.filter((img) => !img.has_caption);
+      const targetImages =
+        selectedIds.size > 0
+          ? uncaptioned.filter((img) => selectedIds.has(img.id))
+          : uncaptioned;
+      for (const img of targetImages) {
+        await writeCaption(img.path, []);
+      }
+      return { created: targetImages.length };
+    },
+    onSuccess: (result) => {
+      invalidateProject();
+      if (result && result.created > 0) {
+        showToast(`Created empty captions for ${result.created} image(s)`);
+      }
+    },
+  });
+
   const addTagToAllMutation = useMutation({
     mutationFn: async () => {
       const tag = addTagToAllText.trim();
@@ -256,6 +282,41 @@ export function Sidebar() {
             <span className="text-orange-400">Uncaptioned</span>
             <span className="text-gray-200">{stats.uncaptioned}</span>
           </div>
+        </div>
+        {stats.uncaptioned > 0 && (
+          <button
+            type="button"
+            onClick={() => createEmptyCaptionsMutation.mutate()}
+            disabled={createEmptyCaptionsMutation.isPending}
+            className="mt-2 flex w-full items-center justify-center gap-1 rounded bg-amber-700/30 px-2 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-700/50 disabled:opacity-50"
+          >
+            {createEmptyCaptionsMutation.isPending ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Tag className="h-3 w-3" />
+            )}
+            Create empty for {stats.uncaptioned} uncaptioned
+          </button>
+        )}
+        <div className="mt-2 flex gap-1">
+          <button
+            type="button"
+            onClick={() => setShowDatasetStats(true)}
+            disabled={!rootPath || stats.total === 0}
+            className="flex flex-1 items-center justify-center gap-1 rounded bg-gray-700 px-2 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-600 hover:text-gray-200 disabled:opacity-50"
+          >
+            <BarChart3 className="h-3 w-3" />
+            Stats
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowFindDuplicates(true)}
+            disabled={!rootPath || stats.total === 0}
+            className="flex flex-1 items-center justify-center gap-1 rounded bg-gray-700 px-2 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-600 hover:text-gray-200 disabled:opacity-50"
+          >
+            <Copy className="h-3 w-3" />
+            Duplicates
+          </button>
         </div>
       </div>
 
@@ -448,6 +509,15 @@ export function Sidebar() {
           <p><kbd className="rounded bg-gray-700 px-1">Enter</kbd> Add tag</p>
         </div>
       </div>
+
+      <FindDuplicatesModal
+        isOpen={showFindDuplicates}
+        onClose={() => setShowFindDuplicates(false)}
+      />
+      <DatasetStatsModal
+        isOpen={showDatasetStats}
+        onClose={() => setShowDatasetStats(false)}
+      />
     </aside>
   );
 }

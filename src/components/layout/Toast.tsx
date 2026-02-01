@@ -17,15 +17,26 @@ export function Toast() {
   if (!toast) return null;
 
   const isError = toast.type === "error";
+  const maxLen = 400;
+  const summarizeError = (msg: string): string => {
+    if (!msg || msg.length <= maxLen) return msg;
+    const lines = msg.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const lastLine = lines[lines.length - 1];
+    if (lastLine && lastLine.length <= maxLen && lastLine.includes(":")) {
+      return lastLine;
+    }
+    return `${msg.slice(0, maxLen).trim()}…`;
+  };
+  const displayMessage = isError && toast.message ? summarizeError(toast.message) : toast.message;
   return (
     <div
       role="alert"
-      className="fixed bottom-4 right-4 z-[100] flex max-w-sm items-start gap-2 rounded-lg border border-border bg-surface-elevated px-4 py-3 shadow-lg"
+      className="fixed bottom-4 right-4 z-[100] flex max-w-md max-h-48 items-start gap-2 overflow-auto rounded-lg border border-border bg-surface-elevated px-4 py-3 shadow-lg"
     >
       <p
-        className={`flex-1 text-sm ${isError ? "text-red-300" : "text-gray-200"}`}
+        className={`flex-1 overflow-auto text-sm ${isError ? "text-red-300" : "text-gray-200"}`}
       >
-        {toast.message}
+        {displayMessage}
       </p>
       <button
         type="button"

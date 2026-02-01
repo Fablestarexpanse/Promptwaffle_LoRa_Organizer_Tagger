@@ -4,8 +4,9 @@ import { X, Download, FolderOpen, Archive, Loader2, Check } from "lucide-react";
 import { useProjectStore } from "@/stores/projectStore";
 import { useUiStore } from "@/stores/uiStore";
 import { useProjectImages } from "@/hooks/useProject";
+import { useSelectionStore } from "@/stores/selectionStore";
 import { exportDataset, exportByRating, selectSaveFolder, selectSaveFile } from "@/lib/tauri";
-import type { ExportResult } from "@/types";
+import type { ExportResult, ExportCaptionFormat } from "@/types";
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -15,15 +16,22 @@ interface ExportModalProps {
 export function ExportModal({ isOpen, onClose }: ExportModalProps) {
   const rootPath = useProjectStore((s) => s.rootPath);
   const { data: images = [] } = useProjectImages();
+  const selectedIds = useSelectionStore((s) => s.selectedIds);
   const showToast = useUiStore((s) => s.showToast);
 
   const [destPath, setDestPath] = useState("");
   const [asZip, setAsZip] = useState(true);
   const [onlyCaptioned, setOnlyCaptioned] = useState(false);
+  const [onlySelected, setOnlySelected] = useState(false);
   const [onlyGood, setOnlyGood] = useState(false);
   const [exportByRatingSubfolders, setExportByRatingSubfolders] = useState(false);
   const [triggerWord, setTriggerWord] = useState("");
   const [sequentialNaming, setSequentialNaming] = useState(false);
+  const [captionFormat, setCaptionFormat] = useState<ExportCaptionFormat>("txt");
+  const [kohyaFolder, setKohyaFolder] = useState(false);
+  const [kohyaRepeatCount, setKohyaRepeatCount] = useState(10);
+  const [kohyaConceptName, setKohyaConceptName] = useState("concept");
+  const [onlyValidDimensions, setOnlyValidDimensions] = useState(false);
   const [result, setResult] = useState<ExportResult | null>(null);
 
   const captionedCount = images.filter((img) => img.has_caption).length;
@@ -31,9 +39,47 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
   const badCount = images.filter((img) => img.rating === "bad").length;
   const needsEditCount = images.filter((img) => img.rating === "needs_edit").length;
 
+  const selectedImages = selectedIds.size > 0
+    ? images.filter((img) => selectedIds.has(img.id))
+    : images;
+
+  const isValidDimensions = (img: { width?: number; height?: number }) => {
+    const w = img.width ?? 0;
+    const h = img.height ?? 0;
+    return w >= 512 && h >= 512 && w % 2 === 0 && h % 2 === 0;
+  };
+
+  const imagesToExport = (() => {
+    let list: typeof images;
+    if (exportByRatingSubfolders) {
+      list = images.filter(
+        (img) => img.rating === "good" || img.rating === "bad" || img.rating === "needs_edit"
+      );
+    } else if (onlySelected && selectedIds.size > 0) {
+      list = onlyCaptioned
+        ? selectedImages.filter((img) => img.has_caption)
+        : selectedImages;
+    } else if (onlyGood) {
+      list = onlyCaptioned
+        ? images.filter((img) => img.rating === "good" && img.has_caption)
+        : images.filter((img) => img.rating === "good");
+    } else {
+      list = onlyCaptioned ? images.filter((img) => img.has_caption) : images;
+    }
+    return onlyValidDimensions ? list.filter(isValidDimensions) : list;
+  })();
+
+  const webpCount = imagesToExport.filter((img) =>
+    img.filename.toLowerCase().endsWith(".webp")
+  ).length;
+
   let willExport: number;
   if (exportByRatingSubfolders) {
     willExport = goodCount + badCount + needsEditCount;
+  } else if (onlySelected && selectedIds.size > 0) {
+    willExport = onlyCaptioned
+      ? selectedImages.filter((img) => img.has_caption).length
+      : selectedImages.length;
   } else if (onlyGood) {
     willExport = onlyCaptioned
       ? images.filter((img) => img.rating === "good" && img.has_caption).length
@@ -53,17 +99,24 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
           sequential_naming: sequentialNaming,
         });
       }
-      const relativePaths = onlyGood
-        ? images.filter((img) => img.rating === "good").map((img) => img.relative_path)
-        : null;
+      let relativePaths: string[] | null = imagesToExport.map((img) => img.relative_path);
+      if (relativePaths.length === 0) relativePaths = null;
       return exportDataset({
         source_path: rootPath,
         dest_path: destPath,
-        as_zip: asZip,
+        as_zip: captionFormat === "metadata" || kohyaFolder ? false : asZip,
         only_captioned: onlyCaptioned,
         relative_paths: relativePaths && relativePaths.length > 0 ? relativePaths : null,
         trigger_word: triggerWord.trim() || null,
         sequential_naming: sequentialNaming,
+        caption_format: captionFormat,
+        kohya_folder:
+          kohyaFolder && kohyaConceptName.trim()
+            ? {
+                repeat_count: Math.max(1, Math.min(999, kohyaRepeatCount)),
+                concept_name: kohyaConceptName.trim(),
+              }
+            : null,
       });
     },
     onSuccess: (res) => {
@@ -83,7 +136,7 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
   });
 
   async function handleSelectDest() {
-    if (exportByRatingSubfolders) {
+    if (exportByRatingSubfolders || captionFormat === "metadata" || kohyaFolder) {
       const path = await selectSaveFolder();
       if (path) setDestPath(path);
       return;
@@ -140,11 +193,17 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
             <p className="mt-1 font-medium text-gray-200">
               {exportByRatingSubfolders
                 ? `Will export ${willExport} into good/, bad/, needs_edit/`
-                : `Will export: ${willExport} images`}
+                : `Will export: ${willExport} image${willExport === 1 ? "" : "s"}`}
             </p>
             {exportByRatingSubfolders && willExport === 0 && (
               <p className="mt-1 text-xs text-amber-400">
                 Rate images (Good / Bad / Edit) on thumbnails first.
+              </p>
+            )}
+            {webpCount > 0 && (
+              <p className="mt-1 text-xs text-amber-400">
+                Warning: {webpCount} WebP image{webpCount === 1 ? "" : "s"}. Some trainers
+                (e.g. older Kohya) may not support WebP. Consider batch resize to PNG/JPEG.
               </p>
             )}
           </div>
@@ -167,36 +226,72 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
 
           {!exportByRatingSubfolders && (
             <>
-              {/* Format toggle */}
+              {selectedIds.size > 0 && (
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={onlySelected}
+                    onChange={(e) => setOnlySelected(e.target.checked)}
+                    className="rounded border-gray-600"
+                  />
+                  <span className="text-sm text-gray-300">
+                    Only export selected images ({selectedIds.size})
+                  </span>
+                </label>
+              )}
+              {/* Caption format */}
               <div>
-                <label className="mb-2 block text-sm text-gray-400">Format</label>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => { setAsZip(true); setDestPath(""); }}
-                    className={`flex flex-1 items-center justify-center gap-2 rounded py-2 text-sm ${
-                      asZip
-                        ? "bg-blue-600 text-white"
-                        : "bg-gray-700 text-gray-300 hover:bg-gray-600"
-                    }`}
-                  >
-                    <Archive className="h-4 w-4" />
-                    ZIP Archive
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setAsZip(false); setDestPath(""); }}
-                    className={`flex flex-1 items-center justify-center gap-2 rounded py-2 text-sm ${
-                      !asZip
-                        ? "bg-blue-600 text-white"
-                        : "bg-gray-700 text-gray-300 hover:bg-gray-600"
-                    }`}
-                  >
-                    <FolderOpen className="h-4 w-4" />
-                    Folder
-                  </button>
-                </div>
+                <label className="mb-1 block text-xs text-gray-500">Caption format</label>
+                <select
+                  value={captionFormat}
+                  onChange={(e) => {
+                    setCaptionFormat(e.target.value as ExportCaptionFormat);
+                    if (e.target.value === "metadata") setAsZip(false);
+                    setDestPath("");
+                  }}
+                  className="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-gray-200"
+                >
+                  <option value="txt">Comma-separated .txt per image</option>
+                  <option value="metadata">Kohya metadata.json</option>
+                </select>
+                {captionFormat === "metadata" && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Exports folder + metadata.json (ZIP not supported)
+                  </p>
+                )}
               </div>
+              {/* Format toggle (ZIP vs Folder) - hidden when metadata format */}
+              {captionFormat === "txt" && !kohyaFolder && (
+                <div>
+                  <label className="mb-2 block text-sm text-gray-400">Output</label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => { setAsZip(true); setDestPath(""); }}
+                      className={`flex flex-1 items-center justify-center gap-2 rounded py-2 text-sm ${
+                        asZip
+                          ? "bg-blue-600 text-white"
+                          : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+                      }`}
+                    >
+                      <Archive className="h-4 w-4" />
+                      ZIP Archive
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setAsZip(false); setDestPath(""); }}
+                      className={`flex flex-1 items-center justify-center gap-2 rounded py-2 text-sm ${
+                        !asZip
+                          ? "bg-blue-600 text-white"
+                          : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+                      }`}
+                    >
+                      <FolderOpen className="h-4 w-4" />
+                      Folder
+                    </button>
+                  </div>
+                </div>
+              )}
             </>
           )}
 
@@ -205,9 +300,9 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
             <label className="mb-1 block text-sm text-gray-400">
               {exportByRatingSubfolders
                 ? "Parent folder (creates good/, bad/, needs_edit/ inside)"
-                : asZip
-                  ? "Save ZIP as"
-                  : "Export to folder"}
+                : captionFormat === "metadata" || kohyaFolder || !asZip
+                  ? "Export to folder"
+                  : "Save ZIP as"}
             </label>
             <div className="flex gap-2">
               <input
@@ -258,6 +353,55 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
               />
               <span className="text-sm text-gray-300">Sequential naming (0001.png, 0002.png...)</span>
             </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={onlyValidDimensions}
+                onChange={(e) => setOnlyValidDimensions(e.target.checked)}
+                className="rounded border-gray-600"
+              />
+              <span className="text-sm text-gray-300">
+                Only valid dimensions (≥512, even w/h)
+              </span>
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={kohyaFolder}
+                onChange={(e) => {
+                  setKohyaFolder(e.target.checked);
+                  if (e.target.checked) setAsZip(false);
+                  setDestPath("");
+                }}
+                className="rounded border-gray-600"
+              />
+              <span className="text-sm text-gray-300">Kohya folder structure (N_conceptname)</span>
+            </label>
+            {kohyaFolder && (
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="mb-0.5 block text-xs text-gray-500">Repeat count</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={999}
+                    value={kohyaRepeatCount}
+                    onChange={(e) => setKohyaRepeatCount(parseInt(e.target.value, 10) || 10)}
+                    className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-gray-200"
+                  />
+                </div>
+                <div className="flex-[2]">
+                  <label className="mb-0.5 block text-xs text-gray-500">Concept name</label>
+                  <input
+                    type="text"
+                    value={kohyaConceptName}
+                    onChange={(e) => setKohyaConceptName(e.target.value)}
+                    placeholder="mycharacter"
+                    className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-gray-200 placeholder-gray-500"
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Trigger word */}

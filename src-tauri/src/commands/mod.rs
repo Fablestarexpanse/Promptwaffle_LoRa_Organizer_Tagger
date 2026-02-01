@@ -1,5 +1,6 @@
 pub mod batch_rename;
 pub mod captions;
+pub mod resource_monitor;
 pub mod export;
 pub mod images;
 pub mod joycaption;

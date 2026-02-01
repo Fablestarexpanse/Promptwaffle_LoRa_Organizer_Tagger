@@ -113,6 +113,9 @@ export interface PromptTemplate {
 }
 
 /** Default prompt templates. */
+/** Export caption format: txt = .txt per image; metadata = Kohya metadata.json */
+export type ExportCaptionFormat = "txt" | "metadata";
+
 /** Export options. */
 export interface ExportOptions {
   source_path: string;
@@ -123,6 +126,10 @@ export interface ExportOptions {
   relative_paths?: string[] | null;
   trigger_word: string | null;
   sequential_naming: boolean;
+  /** "txt" or "metadata" for Kohya metadata.json */
+  caption_format?: ExportCaptionFormat | null;
+  /** Kohya folder structure: N_conceptname (e.g. 10_mycharacter). Requires folder export. */
+  kohya_folder?: { repeat_count: number; concept_name: string } | null;
 }
 
 /** Export into good/bad/needs_edit subfolders. */

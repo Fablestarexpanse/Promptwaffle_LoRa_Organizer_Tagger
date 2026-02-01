@@ -73,8 +73,10 @@ def main():
     if device == "cuda" and (args.low_vram or "nf4" in model_id):
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
-            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_quant_storage=torch.bfloat16,
             bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
         )
 
     try:
@@ -82,6 +84,17 @@ def main():
             model = LlavaForConditionalGeneration.from_pretrained(
                 model_id, quantization_config=bnb_config, device_map="auto"
             )
+            # Fix for mat1/mat2 shape mismatch with 4-bit quant (see HuggingFace model card)
+            try:
+                attention = model.vision_tower.vision_model.head.attention
+                attention.out_proj = torch.nn.Linear(
+                    attention.embed_dim,
+                    attention.embed_dim,
+                    device=model.device,
+                    dtype=torch.bfloat16,
+                )
+            except Exception:
+                pass  # Model structure may differ; skip if fix doesn't apply
         else:
             model = LlavaForConditionalGeneration.from_pretrained(
                 model_id, torch_dtype=torch.bfloat16, device_map="auto"
@@ -110,7 +123,7 @@ def main():
         inputs = processor(text=[convo_string], images=[image], return_tensors="pt")
         inputs = {k: v.to(model.device) if hasattr(v, "to") else v for k, v in inputs.items()}
         if "pixel_values" in inputs:
-            inputs["pixel_values"] = inputs["pixel_values"].to(torch.float16)
+            inputs["pixel_values"] = inputs["pixel_values"].to(torch.bfloat16)
 
         with torch.no_grad():
             generate_ids = model.generate(

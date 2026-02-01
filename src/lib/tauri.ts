@@ -29,6 +29,17 @@ export async function loadProject(rootPath: string): Promise<ImageEntry[]> {
   });
 }
 
+export interface FindDuplicatesResult {
+  groups: string[][];
+}
+
+/** Find duplicate images by file content hash (SHA-256). */
+export async function findDuplicates(rootPath: string): Promise<FindDuplicatesResult> {
+  return invoke<FindDuplicatesResult>("find_duplicates", {
+    root_path: rootPath,
+  });
+}
+
 export async function getThumbnailDataUrl(
   path: string,
   size?: number
@@ -71,6 +82,30 @@ export async function cropImage(
 /** Deletes an image file and its caption .txt from disk. */
 export async function deleteImage(imagePath: string): Promise<void> {
   return invoke<void>("delete_image", { image_path: imagePath });
+}
+
+export type BatchResizeMode = "resize" | "center_crop" | "fit";
+
+export interface BatchResizeResult {
+  processed_count: number;
+  skipped_count: number;
+  output_paths: string[];
+  error: string | null;
+}
+
+/** Batch resize/preprocess images to target size. Outputs to specified folder, copies captions. */
+export async function batchResize(
+  imagePaths: string[],
+  targetSize: number,
+  mode: BatchResizeMode,
+  outputFolder: string
+): Promise<BatchResizeResult> {
+  return invoke<BatchResizeResult>("batch_resize", {
+    image_paths: imagePaths,
+    target_size: targetSize,
+    mode,
+    output_folder: outputFolder,
+  });
 }
 
 export async function readCaption(path: string): Promise<CaptionData> {
@@ -218,7 +253,7 @@ export async function generateCaptionWd14(
 export async function exportDataset(
   options: ExportOptions
 ): Promise<ExportResult> {
-  return invoke<ExportResult>("export_dataset", options);
+  return invoke<ExportResult>("export_dataset", { ...options });
 }
 
 export async function selectSaveFolder(): Promise<string | null> {
@@ -248,6 +283,13 @@ export async function selectSaveFile(
 }
 
 // ============ Rating Functions ============
+
+/** Clear all ratings for a project. Returns count of cleared ratings. */
+export async function clearAllRatings(rootPath: string): Promise<number> {
+  return invoke<number>("clear_all_ratings", {
+    root_path: rootPath,
+  });
+}
 
 export async function setImageRating(
   rootPath: string,
@@ -309,4 +351,53 @@ export async function joycaptionInstallStatus(): Promise<JoyCaptionInstallStatus
 
 export async function joycaptionInstall(): Promise<JoyCaptionInstallResult> {
   return invoke<JoyCaptionInstallResult>("joycaption_install");
+}
+
+export interface JoyCaptionUninstallResult {
+  success: boolean;
+  message: string;
+}
+
+export async function joycaptionUninstall(): Promise<JoyCaptionUninstallResult> {
+  return invoke<JoyCaptionUninstallResult>("joycaption_uninstall");
+}
+
+export interface JoyCaptionDiagnoseResult {
+  ok: boolean;
+  python_exists: boolean;
+  script_exists: boolean;
+  stdout: string;
+  stderr: string;
+  exit_code: number | null;
+  error: string | null;
+}
+
+export interface ResourceStats {
+  cpu: { name: string; usage_percent: number };
+  memory: { usage_percent: number; used_gb: number; total_gb: number };
+  gpu?: {
+    name: string;
+    temperature_c?: number;
+    fan_percent?: number;
+    clock_mhz?: number;
+    usage_percent?: number;
+    memory_used_gb?: number;
+    memory_total_gb?: number;
+    memory_usage_percent?: number;
+    power_draw_w?: number;
+    power_limit_w?: number;
+  };
+}
+
+export async function getResourceStats(): Promise<ResourceStats> {
+  return invoke<ResourceStats>("get_resource_stats");
+}
+
+export async function joycaptionDiagnose(
+  pythonPath: string,
+  scriptPath: string
+): Promise<JoyCaptionDiagnoseResult> {
+  return invoke<JoyCaptionDiagnoseResult>("joycaption_diagnose", {
+    payload: { python_path: pythonPath, script_path: scriptPath },
+  });
 }

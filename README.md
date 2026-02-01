@@ -11,6 +11,9 @@ A modern, cross-platform desktop application for preparing image datasets for AI
 ### Image Management
 - **Responsive Grid View** — Auto-fills the window; resize to see more or fewer columns
 - **Rating System** — Mark images as Good, Bad, or Needs Edit (keyboard: 1, 2, 3)
+- **Batch Resize** — Resize, center-crop, or fit images to target size
+- **Find Duplicates** — Detect duplicate images by content hash
+- **Clear All Ratings** — Remove all ratings from the project
 - **Multi-Select** — Ctrl+Click to select multiple images for batch operations
 - **Image Preview** — Double-click or Enter to view full-size image with zoom
 - **Crop** — Interactive crop with aspect presets, rotate, flip; optionally save as new image
@@ -20,6 +23,8 @@ A modern, cross-platform desktop application for preparing image datasets for AI
 
 ### Tag Editing
 - **Inline Editing** — Click caption area under any image to edit tags
+- **Copy Caption** — Copy caption from previous or next image (Copy prev / Copy next buttons)
+- **Tag Weighting** — Apply `(tag:1.2)` style weights
 - **Right Panel Editor** — Tag list with drag-to-reorder and quick delete
 - **Search & Replace** — Find and replace across all tags with regex support
 - **Live Highlighting** — Matches highlighted as you type
@@ -30,15 +35,15 @@ A modern, cross-platform desktop application for preparing image datasets for AI
 - **Undo/Redo** — Ctrl+Z / Ctrl+Y for tag changes
 
 ### AI Captioning
-- **LM Studio** — Connect to local LM Studio; any vision model; custom prompts and templates
+- **LM Studio** — Connect to local LM Studio; any vision model; custom prompts and templates. See [LM Studio Setup Guide](docs/LM_STUDIO_SETUP.md) for detailed setup and usage.
 - **Ollama** — Same OpenAI-compatible API; use `llava` or other vision models locally
-- **JoyCaption** — One-click installer; LLaVA-based model; modes: Descriptive, Booru
+- **JoyCaption** — One-click installer; LLaVA-based model; install/uninstall; modes: Descriptive, Booru, Training
 - **WD14** — Danbooru-style tags via a user-provided Python script (`--image` + stdout tags)
-- **Hybrid** — WD14 tags + JoyCaption description merged for "best of both"
-- **Batch** — One model load per batch for JoyCaption; parallel requests for LM Studio/Ollama; WD14/Hybrid one-by-one
-- **Stop** — Cancel batch captioning mid-run; progress is kept up to the current chunk
-- **Per-Image** — Generate caption from the grid or from the AI panel with preview
-- **Preview before save** — Optional setting: grid Generate shows Accept/Reject before overwriting
+- **Hybrid** — WD14 tags + JoyCaption description merged
+- **Batch** — One model load per batch for JoyCaption; parallel requests for LM Studio/Ollama; rating filter (All / Good / Bad / Needs Edit)
+- **Stop** — Cancel batch captioning mid-run
+- **Generate Caption** — Single image from AI panel; preview before save option
+- **Resource Monitor** — CPU, memory, and GPU stats always shown at top
 
 ### Filtering & Navigation
 - **Search** — Filter by filename or tag content
@@ -48,8 +53,11 @@ A modern, cross-platform desktop application for preparing image datasets for AI
 
 ### Export
 - **Export Wizard** — Export to folder or ZIP
+- **Export Selected Only** — Export only multi-selected images
+- **Caption Formats** — Plain `.txt` or Kohya `metadata.json`
+- **Kohya Folder Structure** — `N_conceptname` (e.g. `10_mycharacter`) for repeat counts
 - **Export by Rating** — Copy into `good/`, `bad/`, `needs_edit/` subfolders
-- **Options** — Trigger word, sequential naming, only captioned
+- **Options** — Trigger word, sequential naming, only captioned, dimension validation
 
 ## Tech Stack
 
@@ -112,7 +120,7 @@ Installers will be created in `src-tauri/target/release/bundle/` for your platfo
 
 1. **Open a folder** — Click "Open" in the toolbar and select a folder containing images
 2. **Edit tags** — Click the caption area under any image to edit tags inline, or use the right panel editor
-3. **AI captioning** — Select an AI provider (LM Studio, Ollama, WD14, Hybrid, or JoyCaption), configure settings, then click "Generate" (single image) or "Batch" (multiple images)
+3. **AI captioning** — Select an AI provider (LM Studio recommended for testing; see [LM Studio Setup](docs/LM_STUDIO_SETUP.md)), configure settings, then click "Generate Caption" (single) or "Batch" (multiple)
 4. **Filter & Sort** — Use the filter bar to search by filename or tags, filter by caption status or rating, and sort images
 5. **Export** — Click "Export" to save your dataset to a folder or ZIP file, with options for trigger words, sequential naming, and rating-based organization
 
@@ -131,7 +139,7 @@ Installers will be created in `src-tauri/target/release/bundle/` for your platfo
 | Add tag (when input focused)    | Enter                       |
 | Undo last tag change            | Ctrl+Z                      |
 | Redo                            | Ctrl+Y / Ctrl+Shift+Z       |
-| Generate AI caption             | Ctrl+G (when image selected)|
+| Set rating: Good / Bad / Needs Edit | 1 / 2 / 3 (when image selected) |
 | Show help                       | ?                           |
 
 ## Project Structure
@@ -146,7 +154,7 @@ Installers will be created in `src-tauri/target/release/bundle/` for your platfo
 ├── src-tauri/
 │   ├── src/commands/    # Rust: captions, images, lm_studio, ollama, joycaption, export, …
 │   └── resources/       # joycaption_inference.py
-└── docs/
+└── docs/               # LM_STUDIO_SETUP.md, archive/
 ```
 
 ## Caption Format
@@ -161,10 +169,12 @@ image001.txt  → "trigger_word, tag1, tag2, description"
 ## AI Integration
 
 ### LM Studio
+See **[LM Studio Setup Guide](docs/LM_STUDIO_SETUP.md)** for full setup instructions.
+
 1. Download and run [LM Studio](https://lmstudio.ai/)
-2. Load a vision model (e.g., LLaVA, BakLLaVA, or any multimodal model)
+2. Download and load a vision model (e.g. LLaVA, Llama 3.2 Vision)
 3. Start the local server (default: http://localhost:1234)
-4. In the app: **AI provider → LM Studio → Settings → Test** → pick model → **Generate**
+4. In the app: **AI provider → LM Studio → Test** → pick model → **Generate Caption** or **Batch**
 
 ### Ollama
 1. Install [Ollama](https://ollama.com/)
@@ -173,7 +183,8 @@ image001.txt  → "trigger_word, tag1, tag2, description"
 
 ### JoyCaption
 1. In the app: **AI provider → JoyCaption → Install JoyCaption** (one-click venv + model download)
-2. Choose mode (Descriptive or Booru) → **Generate** or **Batch**
+2. Choose mode (Descriptive, Booru, Training) → **Generate Caption** or **Batch**
+3. Use **Uninstall** if needed; reinstall to update the inference script
 
 ### WD14
 1. Obtain a WD14 tagger script that accepts `--image <path>` and prints comma-separated tags to stdout
@@ -185,8 +196,8 @@ image001.txt  → "trigger_word, tag1, tag2, description"
 2. In the app: **AI provider → Hybrid → Settings** → configure WD14 script path and JoyCaption Python/script/mode → **Generate** or **Batch**
 3. Output is WD14 tags plus JoyCaption description merged
 
-### Preview before save (grid Generate)
-Go to **Settings → General → Preview AI caption before saving (grid Generate)**. When enabled, generating from the grid shows a preview so you can Accept or Reject before overwriting existing tags.
+### Preview before save
+Go to **Settings → General → Preview AI caption before saving**. When enabled, Generate Caption shows a preview so you can Accept or Reject before overwriting.
 
 ## Contributing
 

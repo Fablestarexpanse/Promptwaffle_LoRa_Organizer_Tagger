@@ -113,3 +113,17 @@ pub fn get_ratings(payload: GetRatingsPayload) -> Result<HashMap<String, String>
     let data = load_ratings(&payload.root_path);
     Ok(data.ratings)
 }
+
+/// Clear all ratings for a project.
+#[tauri::command]
+pub fn clear_all_ratings(payload: GetRatingsPayload) -> Result<usize, String> {
+    let path = ratings_file_path(&payload.root_path);
+    if !path.exists() {
+        return Ok(0);
+    }
+    let data = load_ratings(&payload.root_path);
+    let count = data.ratings.len();
+    let empty = RatingsData::default();
+    save_ratings(&payload.root_path, &empty)?;
+    Ok(count)
+}

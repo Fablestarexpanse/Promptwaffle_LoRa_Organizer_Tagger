@@ -213,6 +213,121 @@ pub fn crop_image(payload: CropImagePayload) -> Result<Option<String>, String> {
     })
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BatchResizeMode {
+    Resize,
+    CenterCrop,
+    Fit,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct BatchResizePayload {
+    pub image_paths: Vec<String>,
+    pub target_size: u32,
+    pub mode: BatchResizeMode,
+    pub output_folder: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct BatchResizeResult {
+    pub processed_count: usize,
+    pub skipped_count: usize,
+    pub output_paths: Vec<String>,
+    pub error: Option<String>,
+}
+
+/// Batch resize/preprocess images to target size. Outputs to specified folder, copies captions.
+#[tauri::command]
+pub fn batch_resize(payload: BatchResizePayload) -> Result<BatchResizeResult, String> {
+    if payload.target_size < 64 || payload.target_size > 2048 {
+        return Err("Target size must be between 64 and 2048".to_string());
+    }
+    let target = payload.target_size;
+
+    let out_dir = PathBuf::from(&payload.output_folder);
+    fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
+
+    let mut processed = 0usize;
+    let mut skipped = 0usize;
+    let mut output_paths = Vec::new();
+
+    for (i, img_path_str) in payload.image_paths.iter().enumerate() {
+        let path = PathBuf::from(img_path_str);
+        if !path.exists() || !path.is_file() {
+            skipped += 1;
+            continue;
+        }
+
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("png");
+        let new_name = format!("{:04}.{}", i + 1, ext);
+        let out_img = out_dir.join(&new_name);
+        let base = new_name.rsplit_once('.').map(|n| n.0).unwrap_or(&new_name);
+        let out_txt = out_dir.join(format!("{}.txt", base));
+
+        let img = match image::open(&path) {
+            Ok(i) => i,
+            Err(_) => {
+                skipped += 1;
+                continue;
+            }
+        };
+
+        let (w, h) = (img.width(), img.height());
+        let out_img_dyn: image::DynamicImage = match &payload.mode {
+            BatchResizeMode::Resize => img.resize(target, target, FilterType::Triangle),
+            BatchResizeMode::CenterCrop => {
+                let min_side = w.min(h);
+                let crop_size = min_side.min(target);
+                let x = (w - crop_size) / 2;
+                let y = (h - crop_size) / 2;
+                let cropped = img.crop_imm(x, y, crop_size, crop_size);
+                let cropped_dyn = image::DynamicImage::from(cropped.to_rgb8());
+                cropped_dyn.resize(target, target, FilterType::Triangle)
+            }
+            BatchResizeMode::Fit => {
+                let longest = w.max(h);
+                if longest <= target {
+                    img
+                } else {
+                    let scale = target as f32 / longest as f32;
+                    let new_w = (w as f32 * scale).round() as u32;
+                    let new_h = (h as f32 * scale).round() as u32;
+                    img.resize(new_w, new_h, FilterType::Triangle)
+                }
+            }
+        };
+
+        let format = ImageFormat::from_path(&path).unwrap_or(ImageFormat::Png);
+        let mut out_file = fs::File::create(&out_img).map_err(|e| e.to_string())?;
+        if out_img_dyn.write_to(&mut out_file, format).is_err() {
+            skipped += 1;
+            continue;
+        }
+
+        // Copy caption if exists
+        let caption_path = path.with_extension("txt");
+        if caption_path.exists() {
+            if let Ok(content) = fs::read_to_string(&caption_path) {
+                let _ = fs::write(&out_txt, content.trim());
+            }
+        }
+
+        output_paths.push(out_img.to_string_lossy().into_owned());
+        processed += 1;
+    }
+
+    Ok(BatchResizeResult {
+        processed_count: processed,
+        skipped_count: skipped,
+        output_paths,
+        error: None,
+    })
+}
+
 /// Delete an image file and its caption .txt from disk.
 #[tauri::command]
 pub fn delete_image(image_path: String) -> Result<(), String> {

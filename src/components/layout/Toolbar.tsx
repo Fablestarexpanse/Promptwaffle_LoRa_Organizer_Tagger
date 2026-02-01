@@ -1,13 +1,15 @@
 import { useState } from "react";
-import { FolderOpen, Download, FileEdit, Settings, HelpCircle, Eraser } from "lucide-react";
+import { FolderOpen, Download, FileEdit, Maximize2, Settings, HelpCircle, Eraser, StarOff } from "lucide-react";
 import { useProjectStore } from "@/stores/projectStore";
 import { useUiStore } from "@/stores/uiStore";
 import { openFolder } from "@/lib/tauri";
 import { ExportModal } from "../export/ExportModal";
 import { BatchRenameModal } from "../rename/BatchRenameModal";
+import { BatchResizeModal } from "../preprocess/BatchResizeModal";
 import { SettingsModal } from "../settings/SettingsModal";
 import { HelpModal } from "../help/HelpModal";
 import { ClearAllTagsModal } from "./ClearAllTagsModal";
+import { ClearAllRatingsModal } from "./ClearAllRatingsModal";
 
 export function Toolbar() {
   const rootPath = useProjectStore((s) => s.rootPath);
@@ -18,7 +20,9 @@ export function Toolbar() {
 
   const [showExport, setShowExport] = useState(false);
   const [showBatchRename, setShowBatchRename] = useState(false);
+  const [showBatchResize, setShowBatchResize] = useState(false);
   const [showClearAllTags, setShowClearAllTags] = useState(false);
+  const [showClearAllRatings, setShowClearAllRatings] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
 
@@ -75,6 +79,18 @@ export function Toolbar() {
           Batch Rename
         </button>
 
+        {/* Batch Resize */}
+        <button
+          type="button"
+          className="flex items-center gap-2 rounded px-3 py-1.5 text-sm font-medium text-gray-200 hover:bg-white/10 disabled:opacity-50"
+          aria-label="Batch resize / preprocess"
+          onClick={() => setShowBatchResize(true)}
+          disabled={!rootPath}
+        >
+          <Maximize2 className="h-4 w-4" />
+          Batch Resize
+        </button>
+
         {/* Clear all tags */}
         <button
           type="button"
@@ -85,6 +101,18 @@ export function Toolbar() {
         >
           <Eraser className="h-4 w-4" />
           Clear All Tags
+        </button>
+
+        {/* Clear all ratings */}
+        <button
+          type="button"
+          className="flex items-center gap-2 rounded px-3 py-1.5 text-sm font-medium text-gray-200 hover:bg-amber-600/20 hover:text-amber-400 disabled:opacity-50"
+          aria-label="Clear all ratings"
+          onClick={() => setShowClearAllRatings(true)}
+          disabled={!rootPath}
+        >
+          <StarOff className="h-4 w-4" />
+          Clear All Ratings
         </button>
 
         <span className="text-xs text-gray-500">|</span>
@@ -115,9 +143,14 @@ export function Toolbar() {
       {/* Modals */}
       <ExportModal isOpen={showExport} onClose={() => setShowExport(false)} />
       <BatchRenameModal isOpen={showBatchRename} onClose={() => setShowBatchRename(false)} />
+      <BatchResizeModal isOpen={showBatchResize} onClose={() => setShowBatchResize(false)} />
       <ClearAllTagsModal
         isOpen={showClearAllTags}
         onClose={() => setShowClearAllTags(false)}
+      />
+      <ClearAllRatingsModal
+        isOpen={showClearAllRatings}
+        onClose={() => setShowClearAllRatings(false)}
       />
       <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
       <HelpModal isOpen={showHelp} onClose={() => setShowHelp(false)} />

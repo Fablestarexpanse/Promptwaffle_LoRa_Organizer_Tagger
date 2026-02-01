@@ -1,15 +1,72 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { X, GripVertical, Plus, Undo2, Redo2 } from "lucide-react";
+import { X, GripVertical, Plus, Undo2, Redo2, Hash, ChevronLeft, ChevronRight } from "lucide-react";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useProjectStore } from "@/stores/projectStore";
 import { useHistoryStore } from "@/stores/historyStore";
-import { addTag, removeTag, reorderTags } from "@/lib/tauri";
+import { useFilterStore } from "@/stores/filterStore";
+import { useProjectImages } from "@/hooks/useProject";
+import { addTag, removeTag, reorderTags, writeCaption } from "@/lib/tauri";
+import type { ImageEntry } from "@/types";
+
+function filterAndSortImages(images: ImageEntry[], filter: ReturnType<typeof useFilterStore.getState>) {
+  let list = [...images];
+  if (filter.showCaptioned === true) list = list.filter((img) => img.has_caption);
+  else if (filter.showCaptioned === false) list = list.filter((img) => !img.has_caption);
+  if (filter.tagFilter) {
+    const lower = filter.tagFilter.toLowerCase();
+    list = list.filter((img) => img.tags.some((t) => t.toLowerCase().includes(lower)));
+  }
+  if (filter.query.trim()) {
+    const lower = filter.query.toLowerCase();
+    list = list.filter(
+      (img) =>
+        img.filename.toLowerCase().includes(lower) ||
+        img.tags.some((t) => t.toLowerCase().includes(lower))
+    );
+  }
+  if (filter.ratingFilter) list = list.filter((img) => img.rating === filter.ratingFilter);
+  const mult = filter.sortOrder === "asc" ? 1 : -1;
+  list.sort((a, b) => {
+    let cmp = 0;
+    if (filter.sortBy === "name") {
+      cmp = (a.filename ?? "").localeCompare(b.filename ?? "", undefined, { numeric: true });
+    } else if (filter.sortBy === "file_size") {
+      const sa = a.file_size ?? 0;
+      const sb = b.file_size ?? 0;
+      cmp = sa < sb ? -1 : sa > sb ? 1 : 0;
+    } else if (filter.sortBy === "dimension") {
+      const areaA = (a.width ?? 0) * (a.height ?? 0);
+      const areaB = (b.width ?? 0) * (b.height ?? 0);
+      cmp = areaA < areaB ? -1 : areaA > areaB ? 1 : 0;
+    } else {
+      const extA = (a.filename ?? "").split(".").pop() ?? "";
+      const extB = (b.filename ?? "").split(".").pop() ?? "";
+      cmp = extA.localeCompare(extB);
+    }
+    return cmp * mult;
+  });
+  return list;
+}
 
 export function TagEditor() {
   const selectedImage = useSelectionStore((s) => s.selectedImage);
   const rootPath = useProjectStore((s) => s.rootPath);
+  const { data: allImages = [] } = useProjectImages();
+  const filter = useFilterStore();
   const queryClient = useQueryClient();
+
+  const orderedImages = useMemo(
+    () => filterAndSortImages(allImages, filter),
+    [allImages, filter.showCaptioned, filter.tagFilter, filter.query, filter.ratingFilter, filter.sortBy, filter.sortOrder]
+  );
+  const currentIndex = selectedImage
+    ? orderedImages.findIndex((img) => img.id === selectedImage.id)
+    : -1;
+  const prevImage = currentIndex > 0 ? orderedImages[currentIndex - 1] : null;
+  const nextImage = currentIndex >= 0 && currentIndex < orderedImages.length - 1
+    ? orderedImages[currentIndex + 1]
+    : null;
 
   const { pushHistory, undo, redo, canUndo, canRedo } = useHistoryStore();
 
@@ -95,6 +152,48 @@ export function TagEditor() {
     },
   });
 
+  const copyCaptionMutation = useMutation({
+    mutationFn: async (sourceTags: string[]) => {
+      if (!selectedImage) return;
+      const previousTags = [...tags];
+      await writeCaption(selectedImage.path, sourceTags);
+      pushHistory({
+        imagePath: selectedImage.path,
+        imageFilename: selectedImage.filename,
+        previousTags,
+        newTags: sourceTags,
+        description: "Copied caption from adjacent image",
+      });
+      return sourceTags;
+    },
+    onSuccess: (newTags) => {
+      if (newTags) setTags(newTags);
+      invalidateProject();
+    },
+  });
+
+  const setWeightMutation = useMutation({
+    mutationFn: async ({ tag, weight }: { tag: string; weight: number }) => {
+      if (!selectedImage) return tags;
+      const baseTag = tag.replace(/^\((.*):[\d.]+\)$/, "$1").trim() || tag;
+      const weightedTag = `(${baseTag}:${weight})`;
+      const newTags = tags.map((t) => (t === tag ? weightedTag : t));
+      await writeCaption(selectedImage.path, newTags);
+      pushHistory({
+        imagePath: selectedImage.path,
+        imageFilename: selectedImage.filename,
+        previousTags: tags,
+        newTags,
+        description: `Set weight ${weight} on "${baseTag}"`,
+      });
+      return newTags;
+    },
+    onSuccess: (newTags) => {
+      if (newTags) setTags(newTags);
+      invalidateProject();
+    },
+  });
+
   async function handleUndo() {
     const entry = await undo();
     if (entry && entry.imagePath === selectedImage?.path) {
@@ -128,6 +227,19 @@ export function TagEditor() {
 
   function handleRemoveTag(tag: string) {
     removeTagMutation.mutate(tag);
+  }
+
+  function handleSetWeight(tag: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    const baseTag = tag.replace(/^\((.*):[\d.]+\)$/, "$1").trim() || tag;
+    const currentMatch = tag.match(/:([\d.]+)\)$/);
+    const currentWeight = currentMatch ? currentMatch[1] : "1.2";
+    const input = window.prompt(`Weight for "${baseTag}" (Kohya/DreamBooth format):`, currentWeight);
+    if (input === null) return;
+    const weight = parseFloat(input);
+    if (Number.isFinite(weight) && weight > 0) {
+      setWeightMutation.mutate({ tag, weight });
+    }
   }
 
   function handleDragStart(index: number) {
@@ -216,7 +328,33 @@ export function TagEditor() {
             {!selectedImage.has_caption && " • No caption file"}
           </p>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
+          {prevImage && (
+            <button
+              type="button"
+              onClick={() => copyCaptionMutation.mutate(prevImage.tags)}
+              disabled={copyCaptionMutation.isPending}
+              className="flex items-center gap-1 rounded border border-border bg-surface px-2 py-1 text-xs font-medium text-gray-300 hover:border-gray-500 hover:bg-white/10 hover:text-gray-200 disabled:opacity-50"
+              title="Copy caption from previous image"
+              aria-label="Copy caption from previous image"
+            >
+              <ChevronLeft className="h-3.5 w-3.5 shrink-0" />
+              <span>Copy prev</span>
+            </button>
+          )}
+          {nextImage && (
+            <button
+              type="button"
+              onClick={() => copyCaptionMutation.mutate(nextImage.tags)}
+              disabled={copyCaptionMutation.isPending}
+              className="flex items-center gap-1 rounded border border-border bg-surface px-2 py-1 text-xs font-medium text-gray-300 hover:border-gray-500 hover:bg-white/10 hover:text-gray-200 disabled:opacity-50"
+              title="Copy caption from next image"
+              aria-label="Copy caption from next image"
+            >
+              <span>Copy next</span>
+              <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+            </button>
+          )}
           <button
             type="button"
             onClick={handleUndo}
@@ -280,6 +418,15 @@ export function TagEditor() {
               >
                 <GripVertical className="h-3 w-3 cursor-grab text-gray-500" />
                 <span className="flex-1 truncate text-gray-200">{tag}</span>
+                <button
+                  type="button"
+                  onClick={(e) => handleSetWeight(tag, e)}
+                  className="text-gray-500 hover:text-blue-400"
+                  aria-label={`Set weight for ${tag}`}
+                  title="Set weight (e.g. 1.2)"
+                >
+                  <Hash className="h-3 w-3" />
+                </button>
                 <button
                   type="button"
                   onClick={() => handleRemoveTag(tag)}

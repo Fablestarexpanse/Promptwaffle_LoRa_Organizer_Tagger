@@ -51,6 +51,13 @@ interface AiState {
   setIsGenerating: (generating: boolean) => void;
   generationProgress: { current: number; total: number };
   setGenerationProgress: (current: number, total: number) => void;
+
+  // Batch captioning: only caption images with these ratings (empty = no filter)
+  batchCaptionRatingFilter: Set<string>;
+  batchCaptionRatingAll: boolean;
+  setBatchCaptionRatingFilter: (ratings: Set<string>) => void;
+  setBatchCaptionRatingAll: (all: boolean) => void;
+  toggleBatchCaptionRating: (rating: "good" | "bad" | "needs_edit") => void;
 }
 
 export const useAiStore = create<AiState>()(
@@ -155,6 +162,24 @@ export const useAiStore = create<AiState>()(
       generationProgress: { current: 0, total: 0 },
       setGenerationProgress: (current, total) =>
         set({ generationProgress: { current, total } }),
+
+      // Batch captioning rating filter
+      batchCaptionRatingFilter: new Set<string>(),
+      batchCaptionRatingAll: false,
+      setBatchCaptionRatingFilter: (ratings) =>
+        set({ batchCaptionRatingFilter: ratings, batchCaptionRatingAll: false }),
+      setBatchCaptionRatingAll: (all) =>
+        set({
+          batchCaptionRatingAll: all,
+          batchCaptionRatingFilter: all ? new Set() : new Set(),
+        }),
+      toggleBatchCaptionRating: (rating) =>
+        set((state) => {
+          const next = new Set(state.batchCaptionRatingFilter);
+          if (next.has(rating)) next.delete(rating);
+          else next.add(rating);
+          return { batchCaptionRatingFilter: next, batchCaptionRatingAll: false };
+        }),
     }),
     {
       name: "lora-studio-ai-settings",

@@ -4,6 +4,7 @@ import { useProjectImages } from "@/hooks/useProject";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useFilterStore } from "@/stores/filterStore";
 import { useProjectStore } from "@/stores/projectStore";
+import { useAiStore } from "@/stores/aiStore";
 import { setImageRating } from "@/lib/tauri";
 import { ThumbnailCell } from "./ThumbnailCell";
 import type { ImageRating } from "@/types";
@@ -28,7 +29,27 @@ export function ImageGrid() {
   // Selection state
   const selectedImage = useSelectionStore((s) => s.selectedImage);
   const setSelectedImage = useSelectionStore((s) => s.setSelectedImage);
+  const selectedIds = useSelectionStore((s) => s.selectedIds);
   const rootPath = useProjectStore((s) => s.rootPath);
+  const batchCaptionRatingFilter = useAiStore((s) => s.batchCaptionRatingFilter);
+  const batchCaptionRatingAll = useAiStore((s) => s.batchCaptionRatingAll);
+
+  // IDs of images that would be included in batch captioning (for green outline)
+  const captionBatchIds = useMemo(() => {
+    // "All" = every image. Good/Bad/Needs Edit = all images with those ratings.
+    let base: typeof allImages;
+    if (batchCaptionRatingAll) {
+      base = allImages;
+    } else if (batchCaptionRatingFilter.size > 0) {
+      base = allImages.filter((img) => batchCaptionRatingFilter.has(img.rating));
+    } else {
+      base =
+        selectedIds.size > 0
+          ? allImages.filter((img) => selectedIds.has(img.id))
+          : allImages.filter((img) => !img.has_caption);
+    }
+    return new Set(base.map((img) => img.id));
+  }, [allImages, selectedIds, batchCaptionRatingFilter, batchCaptionRatingAll]);
   const queryClient = useQueryClient();
 
   const invalidateProject = useCallback(() => {
@@ -285,6 +306,7 @@ export function ImageGrid() {
             entry={entry}
             size={MIN_THUMB_SIZE}
             index={index}
+            isInCaptionBatch={captionBatchIds.has(entry.id)}
           />
         ))}
       </div>

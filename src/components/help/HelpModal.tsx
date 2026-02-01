@@ -14,7 +14,7 @@ const shortcuts = [
   { key: "Enter", action: "Add tag (when input focused)" },
   { key: "Ctrl+Z", action: "Undo last tag change" },
   { key: "Ctrl+Y / Ctrl+Shift+Z", action: "Redo" },
-  { key: "Ctrl+G", action: "Generate AI caption (when image selected)" },
+  { key: "1 / 2 / 3", action: "Set rating: Good / Bad / Needs Edit" },
   { key: "Escape", action: "Close preview or modal" },
   { key: "+ / −", action: "Zoom in / out (in preview)" },
   { key: "← / →", action: "Previous / next image (in preview)" },

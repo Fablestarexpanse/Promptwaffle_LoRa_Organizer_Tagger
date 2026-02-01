@@ -9,9 +9,11 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             commands::project::open_project,
+            commands::project::find_duplicates,
             commands::images::get_thumbnail,
             commands::images::get_image_data_url,
             commands::images::crop_image,
+            commands::images::batch_resize,
             commands::images::delete_image,
             commands::captions::read_caption,
             commands::captions::write_caption,
@@ -29,8 +31,12 @@ pub fn run() {
             commands::export::export_by_rating,
             commands::ratings::set_rating,
             commands::ratings::get_ratings,
+            commands::ratings::clear_all_ratings,
             commands::joycaption_installer::joycaption_install_status,
             commands::joycaption_installer::joycaption_install,
+            commands::joycaption_installer::joycaption_uninstall,
+            commands::joycaption_installer::joycaption_diagnose,
+            commands::resource_monitor::get_resource_stats,
             commands::batch_rename::batch_rename,
         ])
         .run(tauri::generate_context!())

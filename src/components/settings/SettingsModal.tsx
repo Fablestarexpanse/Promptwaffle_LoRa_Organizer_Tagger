@@ -235,7 +235,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   className="w-full rounded border border-border bg-surface px-3 py-2 text-sm text-gray-200"
                 >
                   <option value="descriptive">Descriptive</option>
-                  <option value="booru">Booru</option>
+                  <option value="straightforward">Straightforward</option>
+                  <option value="booru">Booru Tags</option>
+                  <option value="training">Training Caption</option>
                 </select>
               </div>
               <label className="flex items-center gap-2">

@@ -1,7 +1,7 @@
 //! JoyCaption auto-installer: venv, deps, model download, inference script.
 //! Uses fpgaminer/joycaption + Hugging Face model (e.g. John6666/llama-joycaption-beta-one-hf-llava-nf4).
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::env;
 use std::path::PathBuf;
 use std::process::Command;
@@ -120,6 +120,34 @@ pub struct JoyCaptionInstallResult {
     pub error: Option<String>,
 }
 
+/// Removes the JoyCaption installation (venv, script, everything in the joycaption folder).
+#[tauri::command]
+pub fn joycaption_uninstall() -> Result<JoyCaptionUninstallResult, String> {
+    let root = app_data_joycaption_dir()?;
+    if !root.exists() {
+        return Ok(JoyCaptionUninstallResult {
+            success: true,
+            message: "Not installed".to_string(),
+        });
+    }
+    match std::fs::remove_dir_all(&root) {
+        Ok(()) => Ok(JoyCaptionUninstallResult {
+            success: true,
+            message: "JoyCaption uninstalled.".to_string(),
+        }),
+        Err(e) => Ok(JoyCaptionUninstallResult {
+            success: false,
+            message: format!("Failed to remove JoyCaption: {}", e),
+        }),
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct JoyCaptionUninstallResult {
+    pub success: bool,
+    pub message: String,
+}
+
 /// Runs the JoyCaption installer: venv, pip install, model download, inference script.
 /// Emits "joycaption-install-progress" with { stage, message, percent }.
 #[tauri::command]
@@ -206,4 +234,99 @@ fn run_install(app: Arc<AppHandle>) -> Result<JoyCaptionInstallResult, String> {
         script_path: Some(script_path.to_string_lossy().to_string()),
         error: None,
     })
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct JoyCaptionDiagnosePayload {
+    pub python_path: String,
+    pub script_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct JoyCaptionDiagnoseResult {
+    pub ok: bool,
+    pub python_exists: bool,
+    pub script_exists: bool,
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: Option<i32>,
+    pub error: Option<String>,
+}
+
+/// Run a quick JoyCaption test (script without --image prints help) to diagnose issues.
+#[tauri::command]
+pub fn joycaption_diagnose(payload: JoyCaptionDiagnosePayload) -> JoyCaptionDiagnoseResult {
+    let script_path = PathBuf::from(&payload.script_path);
+    let script_exists = script_path.exists();
+
+    let python_exists = Command::new(&payload.python_path)
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if !python_exists {
+        return JoyCaptionDiagnoseResult {
+            ok: false,
+            python_exists: false,
+            script_exists,
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: None,
+            error: Some(format!(
+                "Python not found or failed: {}",
+                payload.python_path
+            )),
+        };
+    }
+    if !script_exists {
+        return JoyCaptionDiagnoseResult {
+            ok: false,
+            python_exists: true,
+            script_exists: false,
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: None,
+            error: Some(format!("Script not found: {}", payload.script_path)),
+        };
+    }
+
+    let output = Command::new(&payload.python_path)
+        .arg(&payload.script_path)
+        .arg("--help")
+        .output();
+
+    match output {
+        Ok(o) => {
+            let stdout = String::from_utf8_lossy(&o.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&o.stderr).to_string();
+            let exit_code = o.status.code();
+            let ok = o.status.success();
+            let error = if ok {
+                None
+            } else if stderr.is_empty() {
+                Some(format!("Exit code: {:?}", exit_code))
+            } else {
+                Some(stderr.clone())
+            };
+            JoyCaptionDiagnoseResult {
+                ok,
+                python_exists: true,
+                script_exists: true,
+                stdout,
+                stderr,
+                exit_code,
+                error,
+            }
+        }
+        Err(e) => JoyCaptionDiagnoseResult {
+            ok: false,
+            python_exists: true,
+            script_exists: true,
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: None,
+            error: Some(format!("Failed to run JoyCaption: {}", e)),
+        },
+    }
 }

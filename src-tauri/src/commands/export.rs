@@ -59,6 +59,18 @@ pub struct ExportOptions {
     /// Use sequential naming (001.png, 002.png, etc.)
     #[serde(default)]
     pub sequential_naming: bool,
+    /// "txt" = comma-separated .txt per image; "metadata" = Kohya metadata.json
+    #[serde(default)]
+    pub caption_format: Option<String>,
+    /// Kohya folder structure: N_conceptname (e.g. 10_mycharacter)
+    #[serde(default)]
+    pub kohya_folder: Option<KohyaFolderOptions>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct KohyaFolderOptions {
+    pub repeat_count: u32,
+    pub concept_name: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -118,15 +130,101 @@ pub async fn export_dataset(options: ExportOptions) -> Result<ExportResult, Stri
 
     images.sort();
 
+    let use_metadata = options.caption_format.as_deref() == Some("metadata");
+
     if options.as_zip {
-        export_as_zip(&images, &options)
+        if use_metadata {
+            Err("ZIP + metadata.json format not supported; use folder export".to_string())
+        } else if options.kohya_folder.is_some() {
+            Err("Kohya folder structure requires folder export, not ZIP".to_string())
+        } else {
+            export_as_zip(&images, &options)
+        }
+    } else if use_metadata {
+        export_to_folder_metadata(&images, &options)
     } else {
         export_to_folder(&images, &options)
     }
 }
 
-fn export_to_folder(images: &[PathBuf], options: &ExportOptions) -> Result<ExportResult, String> {
+fn export_to_folder_metadata(
+    images: &[PathBuf],
+    options: &ExportOptions,
+) -> Result<ExportResult, String> {
     let dest = PathBuf::from(&options.dest_path);
+    fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+
+    let mut metadata: HashMap<String, String> = HashMap::new();
+    let mut exported = 0;
+    let mut skipped = 0;
+
+    for (i, img_path) in images.iter().enumerate() {
+        let ext = img_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("png");
+
+        let new_name = if options.sequential_naming {
+            format!("{:04}.{}", i + 1, ext)
+        } else {
+            img_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("image.png")
+                .to_string()
+        };
+
+        let dest_img = dest.join(&new_name);
+
+        if fs::copy(img_path, &dest_img).is_err() {
+            skipped += 1;
+            continue;
+        }
+
+        let caption_path = caption_path_for(img_path);
+        let caption_text = if caption_path.exists() {
+            if let Ok(content) = fs::read_to_string(&caption_path) {
+                let base = content.trim();
+                if let Some(ref trigger) = options.trigger_word {
+                    if !trigger.is_empty() {
+                        format!("{}, {}", trigger.trim(), base)
+                    } else {
+                        base.to_string()
+                    }
+                } else {
+                    base.to_string()
+                }
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        metadata.insert(new_name, caption_text);
+        exported += 1;
+    }
+
+    let metadata_path = dest.join("metadata.json");
+    let json = serde_json::to_string_pretty(&metadata).map_err(|e| e.to_string())?;
+    fs::write(&metadata_path, json).map_err(|e| e.to_string())?;
+
+    Ok(ExportResult {
+        success: true,
+        exported_count: exported,
+        skipped_count: skipped,
+        error: None,
+        output_path: options.dest_path.clone(),
+    })
+}
+
+fn export_to_folder(images: &[PathBuf], options: &ExportOptions) -> Result<ExportResult, String> {
+    let mut dest = PathBuf::from(&options.dest_path);
+    if let Some(ref kf) = options.kohya_folder {
+        let name = kf.concept_name.replace(['/', '\\'], "_").trim().to_string();
+        let name = if name.is_empty() { "concept".to_string() } else { name };
+        dest = dest.join(format!("{}_{}", kf.repeat_count, name));
+    }
     fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
 
     let mut exported = 0;
