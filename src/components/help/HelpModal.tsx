@@ -8,11 +8,16 @@ interface HelpModalProps {
 const shortcuts = [
   { key: "←→↑↓", action: "Navigate image grid" },
   { key: "Home / End", action: "Jump to first / last image" },
+  { key: "Ctrl+Click", action: "Multi-select images" },
+  { key: "Double-click", action: "Open image in preview" },
   { key: "T", action: "Focus tag input" },
   { key: "Enter", action: "Add tag (when input focused)" },
   { key: "Ctrl+Z", action: "Undo last tag change" },
   { key: "Ctrl+Y / Ctrl+Shift+Z", action: "Redo" },
-  { key: "Ctrl+G", action: "Generate AI caption" },
+  { key: "Ctrl+G", action: "Generate AI caption (when image selected)" },
+  { key: "Escape", action: "Close preview or modal" },
+  { key: "+ / −", action: "Zoom in / out (in preview)" },
+  { key: "← / →", action: "Previous / next image (in preview)" },
   { key: "?", action: "Show this help" },
 ];
 

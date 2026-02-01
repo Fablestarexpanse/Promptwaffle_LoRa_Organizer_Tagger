@@ -8,3 +8,4 @@ pub mod lm_studio;
 pub mod ollama;
 pub mod project;
 pub mod ratings;
+pub mod wd14;

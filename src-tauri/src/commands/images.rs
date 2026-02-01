@@ -2,10 +2,41 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use image::imageops::FilterType;
 use image::ImageFormat;
 use serde::Deserialize;
-use std::io::Cursor;
+use sha2::{Digest, Sha256};
+use std::fs;
+use std::io::{Cursor, Read, Write};
 use std::path::PathBuf;
 
 const THUMB_SIZE: u32 = 256;
+const CACHE_DIR_NAME: &str = "lora-dataset-studio-thumbnails";
+
+/// Cache dir under temp. Creates on first use.
+fn thumbnail_cache_dir() -> Result<PathBuf, String> {
+    let dir = std::env::temp_dir().join(CACHE_DIR_NAME);
+    if !dir.exists() {
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    }
+    Ok(dir)
+}
+
+/// Cache key from path and mtime so cache invalidates when file changes.
+fn thumbnail_cache_key(path: &std::path::Path, size: u32) -> Result<String, String> {
+    let meta = fs::metadata(path).map_err(|e| e.to_string())?;
+    let mtime = meta
+        .modified()
+        .map_err(|e| e.to_string())?
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "mtime error".to_string())?
+        .as_nanos()
+        .to_string();
+    let path_str = path.to_string_lossy();
+    let mut hasher = Sha256::new();
+    hasher.update(path_str.as_bytes());
+    hasher.update(mtime.as_bytes());
+    hasher.update(size.to_le_bytes());
+    let hash = hasher.finalize();
+    Ok(hex::encode(&hash[..16]))
+}
 
 #[derive(Debug, Deserialize)]
 pub struct CropImagePayload {
@@ -41,6 +72,7 @@ pub struct GetImageDataUrlPayload {
 }
 
 /// Generates a thumbnail for the image at path. Returns a data URL (base64 JPEG).
+/// Uses an on-disk cache under temp (keyed by path + mtime + size) to avoid regenerating on scroll.
 #[tauri::command]
 pub fn get_thumbnail(payload: GetThumbnailPayload) -> Result<String, String> {
     let path = PathBuf::from(&payload.path);
@@ -49,6 +81,17 @@ pub fn get_thumbnail(payload: GetThumbnailPayload) -> Result<String, String> {
     }
 
     let size = payload.size.unwrap_or(THUMB_SIZE).min(512);
+    let cache_dir = thumbnail_cache_dir()?;
+    let key = thumbnail_cache_key(&path, size)?;
+    let cache_path = cache_dir.join(format!("{}.jpg", key));
+
+    if cache_path.exists() && cache_path.is_file() {
+        let mut buf = Vec::new();
+        let mut f = fs::File::open(&cache_path).map_err(|e| e.to_string())?;
+        f.read_to_end(&mut buf).map_err(|e| e.to_string())?;
+        let b64 = BASE64.encode(&buf);
+        return Ok(format!("data:image/jpeg;base64,{b64}"));
+    }
 
     let img = image::open(&path).map_err(|e| e.to_string())?;
     let thumb = img.resize(size, size, FilterType::Triangle);
@@ -56,6 +99,10 @@ pub fn get_thumbnail(payload: GetThumbnailPayload) -> Result<String, String> {
     thumb
         .write_to(&mut Cursor::new(&mut buf), ImageFormat::Jpeg)
         .map_err(|e| e.to_string())?;
+
+    if let Ok(mut f) = fs::File::create(&cache_path) {
+        let _ = f.write_all(&buf);
+    }
 
     let b64 = BASE64.encode(&buf);
     Ok(format!("data:image/jpeg;base64,{b64}"))

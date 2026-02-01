@@ -12,6 +12,7 @@ import {
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useProjectStore } from "@/stores/projectStore";
 import { useUiStore } from "@/stores/uiStore";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { cropImage, getImageDataUrl } from "@/lib/tauri";
 
 const HANDLE_SIZE = 14;
@@ -68,7 +69,9 @@ export function CropModal() {
   const [dragState, setDragState] = useState<DragState | null>(null);
 
   const imageContainerRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const isOpen = useUiStore((s) => s.isCropOpen);
+  useFocusTrap(dialogRef, isOpen);
 
   // Load image via backend (data URL) so it works without asset protocol
   const { data: imageSrc } = useQuery({
@@ -497,7 +500,7 @@ export function CropModal() {
   if (!isOpen || !selectedImage) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-black/90">
+    <div ref={dialogRef} className="fixed inset-0 z-[60] flex flex-col bg-black/90">
       <div className="flex items-center justify-between border-b border-border bg-surface-elevated/95 px-4 py-2">
         <h2 className="flex items-center gap-2 text-lg font-medium text-gray-100">
           <Crop className="h-5 w-5" />

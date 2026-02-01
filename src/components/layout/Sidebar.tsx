@@ -165,7 +165,7 @@ export function Sidebar() {
         clearTimeout(triggerWordDebounceRef.current);
       }
     };
-  }, [triggerWord, previousTriggerWord, triggerWordLocked, rootPath, images.length]);
+  }, [triggerWord, previousTriggerWord, triggerWordLocked, rootPath, images.length, applyTriggerWordMutation]);
 
   const addTagToAllMutation = useMutation({
     mutationFn: async () => {

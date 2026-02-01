@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { X, Download, FolderOpen, Archive, Loader2, Check } from "lucide-react";
 import { useProjectStore } from "@/stores/projectStore";
+import { useUiStore } from "@/stores/uiStore";
 import { useProjectImages } from "@/hooks/useProject";
 import { exportDataset, exportByRating, selectSaveFolder, selectSaveFile } from "@/lib/tauri";
 import type { ExportResult } from "@/types";
@@ -14,6 +15,7 @@ interface ExportModalProps {
 export function ExportModal({ isOpen, onClose }: ExportModalProps) {
   const rootPath = useProjectStore((s) => s.rootPath);
   const { data: images = [] } = useProjectImages();
+  const showToast = useUiStore((s) => s.showToast);
 
   const [destPath, setDestPath] = useState("");
   const [asZip, setAsZip] = useState(true);
@@ -68,13 +70,15 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
       setResult(res);
     },
     onError: (err: Error) => {
+      const msg = err.message ?? String(err);
       setResult({
         success: false,
         exported_count: 0,
         skipped_count: 0,
-        error: err.message ?? String(err),
+        error: msg,
         output_path: "",
       });
+      showToast(msg);
     },
   });
 

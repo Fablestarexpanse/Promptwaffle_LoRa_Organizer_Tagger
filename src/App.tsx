@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Toolbar } from "./components/layout/Toolbar";
 import { AppLayout } from "./components/layout/AppLayout";
 import { StatusBar } from "./components/layout/StatusBar";
+import { Toast } from "./components/layout/Toast";
 import { ImagePreviewModal } from "./components/preview/ImagePreviewModal";
 import { CropModal } from "./components/preview/CropModal";
 import { ProjectLoadOverlay } from "./components/project/ProjectLoadOverlay";
@@ -37,6 +38,7 @@ function App() {
       <CropModal />
       <ProjectLoadOverlay />
       <RestorePreviousFolderPrompt />
+      <Toast />
     </div>
   );
 }

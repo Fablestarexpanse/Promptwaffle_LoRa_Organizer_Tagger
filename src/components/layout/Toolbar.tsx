@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { FolderOpen, Download, FileEdit, Settings, HelpCircle, Eraser } from "lucide-react";
 import { useProjectStore } from "@/stores/projectStore";
+import { useUiStore } from "@/stores/uiStore";
 import { openFolder } from "@/lib/tauri";
 import { ExportModal } from "../export/ExportModal";
 import { BatchRenameModal } from "../rename/BatchRenameModal";
@@ -13,6 +14,7 @@ export function Toolbar() {
   const setRootPath = useProjectStore((s) => s.setRootPath);
   const setIsLoadingProject = useProjectStore((s) => s.setIsLoadingProject);
   const setLastOpenedFolder = useProjectStore((s) => s.setLastOpenedFolder);
+  const showToast = useUiStore((s) => s.showToast);
 
   const [showExport, setShowExport] = useState(false);
   const [showBatchRename, setShowBatchRename] = useState(false);
@@ -31,6 +33,7 @@ export function Toolbar() {
     } catch (err) {
       console.error("Open folder failed:", err);
       setIsLoadingProject(false);
+      showToast(err instanceof Error ? err.message : "Failed to open folder");
     }
   }
 

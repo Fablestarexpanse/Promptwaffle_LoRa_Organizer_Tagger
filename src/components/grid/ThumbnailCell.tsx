@@ -7,6 +7,7 @@ import {
   setImageRating,
   generateCaptionLmStudio,
   generateCaptionJoyCaption,
+  generateCaptionWd14,
   deleteImage,
 } from "@/lib/tauri";
 import { useSelectionStore } from "@/stores/selectionStore";
@@ -15,6 +16,7 @@ import { useProjectStore } from "@/stores/projectStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useUiStore } from "@/stores/uiStore";
 import { useAiStore } from "@/stores/aiStore";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import type { ImageEntry, ImageRating } from "@/types";
 
 function parseTagsFromText(text: string): string[] {
@@ -119,6 +121,7 @@ export function ThumbnailCell({ entry, size, index }: ThumbnailCellProps) {
   const customPrompt = useAiStore((s) => s.customPrompt);
   const lmStudio = useAiStore((s) => s.lmStudio);
   const ollama = useAiStore((s) => s.ollama);
+  const wd14 = useAiStore((s) => s.wd14);
   const joyCaption = useAiStore((s) => s.joyCaption);
   const isConnected = useAiStore((s) => s.isConnected);
 
@@ -126,12 +129,20 @@ export function ThumbnailCell({ entry, size, index }: ThumbnailCellProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showClearTagsConfirm, setShowClearTagsConfirm] = useState(false);
+  const [previewCaptionFromGrid, setPreviewCaptionFromGrid] = useState<string | null>(null);
   const captionInputRef = useRef<HTMLTextAreaElement>(null);
+  const deleteModalRef = useRef<HTMLDivElement>(null);
+  const clearModalRef = useRef<HTMLDivElement>(null);
+  const previewModalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(deleteModalRef, showDeleteConfirm);
+  useFocusTrap(clearModalRef, showClearTagsConfirm);
+  useFocusTrap(previewModalRef, !!previewCaptionFromGrid);
   const searchHighlightText = useSearchReplaceStore((s) => s.searchHighlightText);
   const addTagPreviewText = useSearchReplaceStore((s) => s.addTagPreviewText);
   const addTagPreviewAtFront = useSearchReplaceStore((s) => s.addTagPreviewAtFront);
   const triggerWord = useSettingsStore((s) => s.triggerWord);
   const confirmBeforeClearTags = useSettingsStore((s) => s.confirmBeforeClearTags);
+  const previewBeforeSaveCaption = useSettingsStore((s) => s.previewBeforeSaveCaption);
 
   const isSelected = selectedImage?.id === entry.id;
   const isMultiSelected = selectedIds.has(entry.id);
@@ -173,33 +184,74 @@ export function ThumbnailCell({ entry, size, index }: ThumbnailCellProps) {
         const baseUrl = provider === "ollama" ? ollama.base_url : lmStudio.base_url;
         const model = provider === "ollama" ? ollama.model : lmStudio.model;
         return generateCaptionLmStudio(entry.path, baseUrl, model, prompt);
-      } else {
-        return generateCaptionJoyCaption(
+      }
+      if (provider === "wd14") {
+        return generateCaptionWd14(entry.path, wd14.python_path, wd14.script_path);
+      }
+      if (provider === "hybrid") {
+        const wd14Result = await generateCaptionWd14(entry.path, wd14.python_path, wd14.script_path);
+        const joyResult = await generateCaptionJoyCaption(
           entry.path,
           joyCaption.python_path,
           joyCaption.script_path,
           joyCaption.mode,
           joyCaption.low_vram
         );
+        const wd14Tags = wd14Result.success && wd14Result.caption ? wd14Result.caption.trim() : "";
+        const joyText = joyResult.success && joyResult.caption ? joyResult.caption.trim() : "";
+        const merged = [wd14Tags, joyText].filter(Boolean).join(", ");
+        return { success: !!merged, caption: merged, error: null as string | null };
       }
+      return generateCaptionJoyCaption(
+        entry.path,
+        joyCaption.python_path,
+        joyCaption.script_path,
+        joyCaption.mode,
+        joyCaption.low_vram
+      );
     },
     onSuccess: (result) => {
       if (result?.success && result.caption) {
-        let tags = result.caption
-          .split(",")
-          .map((t) => t.trim())
-          .filter((t) => t);
-        const tw = triggerWord?.trim();
-        if (tw) {
-          const withoutTrigger = tags.filter(
-            (t) => t.toLowerCase() !== tw.toLowerCase()
-          );
-          tags = [tw, ...withoutTrigger];
+        if (previewBeforeSaveCaption) {
+          setPreviewCaptionFromGrid(result.caption);
+        } else {
+          let tags = result.caption
+            .split(",")
+            .map((t) => t.trim())
+            .filter((t) => t);
+          const tw = triggerWord?.trim();
+          if (tw) {
+            const withoutTrigger = tags.filter(
+              (t) => t.toLowerCase() !== tw.toLowerCase()
+            );
+            tags = [tw, ...withoutTrigger];
+          }
+          writeMutation.mutate(tags);
         }
-        writeMutation.mutate(tags);
       }
     },
   });
+
+  function handleAcceptPreviewCaption() {
+    if (!previewCaptionFromGrid) return;
+    let tags = previewCaptionFromGrid
+      .split(",")
+      .map((t) => t.trim())
+      .filter((t) => t);
+    const tw = triggerWord?.trim();
+    if (tw) {
+      const withoutTrigger = tags.filter(
+        (t) => t.toLowerCase() !== tw.toLowerCase()
+      );
+      tags = [tw, ...withoutTrigger];
+    }
+    writeMutation.mutate(tags);
+    setPreviewCaptionFromGrid(null);
+  }
+
+  function handleRejectPreviewCaption() {
+    setPreviewCaptionFromGrid(null);
+  }
 
   const displayText = tagsToText(entry.tags);
   const previewTags =
@@ -352,7 +404,9 @@ export function ThumbnailCell({ entry, size, index }: ThumbnailCellProps) {
 
   return (
     <div
-      role="listitem"
+      role="option"
+      aria-selected={isSelected || isMultiSelected}
+      aria-current={isSelected ? "true" : undefined}
       tabIndex={0}
       data-index={index}
       onClick={handleImageClick}
@@ -484,7 +538,9 @@ export function ThumbnailCell({ entry, size, index }: ThumbnailCellProps) {
           onClick={handleGenerateClick}
           disabled={
             generateMutation.isPending ||
-            ((provider === "lm_studio" || provider === "ollama") && !isConnected)
+            ((provider === "lm_studio" || provider === "ollama") && !isConnected) ||
+            (provider === "wd14" && !(wd14.script_path != null && wd14.script_path !== "")) ||
+            (provider === "hybrid" && !(wd14.script_path != null && wd14.script_path !== ""))
           }
           className={`rounded p-0.5 transition-colors ${
             generateMutation.isSuccess
@@ -512,6 +568,7 @@ export function ThumbnailCell({ entry, size, index }: ThumbnailCellProps) {
           aria-modal="true"
         >
           <div
+            ref={deleteModalRef}
             className="w-full max-w-sm rounded-lg border border-border bg-surface-elevated shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
@@ -573,6 +630,7 @@ export function ThumbnailCell({ entry, size, index }: ThumbnailCellProps) {
           aria-modal="true"
         >
           <div
+            ref={clearModalRef}
             className="w-full max-w-sm rounded-lg border border-border bg-surface-elevated shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
@@ -618,6 +676,67 @@ export function ThumbnailCell({ entry, size, index }: ThumbnailCellProps) {
                     <Eraser className="h-4 w-4" />
                   )}
                   Clear tags
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Preview caption before save (grid Generate) */}
+      {previewCaptionFromGrid && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+          role="dialog"
+          aria-labelledby="preview-caption-title"
+          aria-modal="true"
+        >
+          <div
+            ref={previewModalRef}
+            className="w-full max-w-md rounded-lg border border-border bg-surface-elevated shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <h2
+                id="preview-caption-title"
+                className="flex items-center gap-2 text-lg font-medium text-gray-100"
+              >
+                <Sparkles className="h-5 w-5 text-purple-400" />
+                Preview caption
+              </h2>
+              <button
+                type="button"
+                onClick={handleRejectPreviewCaption}
+                aria-label="Close"
+                className="rounded p-1 text-gray-400 hover:bg-white/10 hover:text-gray-200"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-4 p-4">
+              <p className="text-sm text-gray-200 whitespace-pre-wrap break-words">
+                {previewCaptionFromGrid}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleRejectPreviewCaption}
+                  className="flex flex-1 items-center justify-center rounded border border-border bg-surface px-3 py-2 text-sm font-medium text-gray-300 hover:bg-gray-600 hover:text-gray-200"
+                >
+                  Reject
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAcceptPreviewCaption}
+                  disabled={writeMutation.isPending}
+                  className="flex flex-1 items-center justify-center gap-2 rounded bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-500 disabled:opacity-50"
+                >
+                  {writeMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Check className="h-4 w-4" />
+                  )}
+                  Accept
                 </button>
               </div>
             </div>

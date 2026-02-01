@@ -199,6 +199,20 @@ export async function generateCaptionsJoyCaptionBatch(
   });
 }
 
+export async function generateCaptionWd14(
+  imagePath: string,
+  pythonPath: string,
+  scriptPath: string | null
+): Promise<CaptionResult> {
+  return invoke<CaptionResult>("generate_caption_wd14", {
+    payload: {
+      image_path: imagePath,
+      python_path: pythonPath,
+      script_path: scriptPath,
+    },
+  });
+}
+
 // ============ Export Functions ============
 
 export async function exportDataset(

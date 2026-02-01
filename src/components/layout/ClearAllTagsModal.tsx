@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Eraser, X, Loader2 } from "lucide-react";
 import { useProjectStore } from "@/stores/projectStore";
 import { useProjectImages } from "@/hooks/useProject";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { writeCaption } from "@/lib/tauri";
 
 const CONFIRM_WORD = "delete";
@@ -14,6 +15,8 @@ interface ClearAllTagsModalProps {
 
 export function ClearAllTagsModal({ isOpen, onClose }: ClearAllTagsModalProps) {
   const [confirmText, setConfirmText] = useState("");
+  const contentRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(contentRef, isOpen);
   const rootPath = useProjectStore((s) => s.rootPath);
   const { data: images = [] } = useProjectImages();
   const queryClient = useQueryClient();
@@ -56,7 +59,8 @@ export function ClearAllTagsModal({ isOpen, onClose }: ClearAllTagsModalProps) {
       aria-labelledby="clear-all-tags-title"
       aria-modal="true"
     >
-      <div
+<div
+        ref={contentRef}
         className="w-full max-w-md rounded-lg border border-border bg-surface-elevated shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >

@@ -29,12 +29,15 @@ pub struct BatchRenameResult {
 }
 
 /// Renames image files and their caption files with prefix + zero-padded index.
+/// Rejects any relative_path that resolves outside the project root (path traversal safety).
 #[tauri::command]
 pub fn batch_rename(payload: BatchRenamePayload) -> Result<BatchRenameResult, String> {
     let root = PathBuf::from(&payload.root_path);
     if !root.exists() || !root.is_dir() {
         return Err("Root path does not exist or is not a directory".to_string());
     }
+
+    let canonical_root = root.canonicalize().map_err(|e| e.to_string())?;
 
     let prefix = payload.prefix.trim();
     if prefix.is_empty() {
@@ -52,6 +55,21 @@ pub fn batch_rename(payload: BatchRenamePayload) -> Result<BatchRenameResult, St
 
         if !old_path.exists() || !old_path.is_file() {
             errors.push(format!("Not found: {}", relative_path));
+            index += 1;
+            continue;
+        }
+
+        // Path traversal safety: resolved path must be under project root
+        let old_canonical = match old_path.canonicalize() {
+            Ok(p) => p,
+            Err(e) => {
+                errors.push(format!("Invalid path {}: {}", relative_path, e));
+                index += 1;
+                continue;
+            }
+        };
+        if old_canonical.strip_prefix(&canonical_root).is_err() {
+            errors.push(format!("Path outside project: {}", relative_path));
             index += 1;
             continue;
         }

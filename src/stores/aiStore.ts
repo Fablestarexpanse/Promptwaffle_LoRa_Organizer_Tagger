@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { AiProvider, PromptTemplate, LmStudioSettings, OllamaSettings, JoyCaptionSettings } from "@/types";
+import type { AiProvider, PromptTemplate, LmStudioSettings, OllamaSettings, Wd14Settings, JoyCaptionSettings } from "@/types";
 import { DEFAULT_PROMPT_TEMPLATES } from "@/types";
 
 interface AiState {
@@ -21,6 +21,11 @@ interface AiState {
   ollama: OllamaSettings;
   setOllamaBaseUrl: (url: string) => void;
   setOllamaModel: (model: string | null) => void;
+
+  // WD14 Tagger settings
+  wd14: Wd14Settings;
+  setWd14PythonPath: (path: string) => void;
+  setWd14ScriptPath: (path: string | null) => void;
 
   // JoyCaption settings
   joyCaption: JoyCaptionSettings;
@@ -87,6 +92,20 @@ export const useAiStore = create<AiState>()(
           ollama: { ...state.ollama, model },
         })),
 
+      // WD14
+      wd14: {
+        python_path: "python",
+        script_path: null,
+      },
+      setWd14PythonPath: (path) =>
+        set((state) => ({
+          wd14: { ...state.wd14, python_path: path },
+        })),
+      setWd14ScriptPath: (path) =>
+        set((state) => ({
+          wd14: { ...state.wd14, script_path: path },
+        })),
+
       // JoyCaption
       joyCaption: {
         python_path: "python",
@@ -144,6 +163,7 @@ export const useAiStore = create<AiState>()(
         customPrompt: state.customPrompt,
         lmStudio: state.lmStudio,
         ollama: state.ollama,
+        wd14: state.wd14,
         joyCaption: state.joyCaption,
         promptTemplates: state.promptTemplates,
         selectedTemplateId: state.selectedTemplateId,

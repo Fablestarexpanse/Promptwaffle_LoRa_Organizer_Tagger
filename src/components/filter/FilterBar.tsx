@@ -1,7 +1,7 @@
 import { Search, X, Smile, Frown, Wrench, CheckSquare, ArrowUp, ArrowDown } from "lucide-react";
 import { useFilterStore } from "@/stores/filterStore";
 import { useSelectionStore } from "@/stores/selectionStore";
-import type { ImageRating, SortBy, SortOrder } from "@/types";
+import type { ImageRating } from "@/types";
 
 export function FilterBar() {
   const query = useFilterStore((s) => s.query);

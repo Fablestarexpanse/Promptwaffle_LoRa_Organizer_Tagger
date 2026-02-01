@@ -25,6 +25,7 @@ import {
   generateCaptionsBatch,
   generateCaptionJoyCaption,
   generateCaptionsJoyCaptionBatch,
+  generateCaptionWd14,
   writeCaption,
   joycaptionInstallStatus,
   joycaptionInstall,
@@ -52,6 +53,9 @@ export function AiPanel() {
     ollama,
     setOllamaBaseUrl,
     setOllamaModel,
+    wd14,
+    setWd14PythonPath,
+    setWd14ScriptPath,
     joyCaption,
     setJoyCaptionPythonPath,
     setJoyCaptionScriptPath,
@@ -86,6 +90,14 @@ export function AiPanel() {
     provider !== "joycaption" ||
     joyCaptionInstallStatusData?.installed === true ||
     (joyCaption.script_path != null && joyCaption.script_path !== "");
+
+  const wd14Ready =
+    provider !== "wd14" ||
+    (wd14.script_path != null && wd14.script_path !== "");
+
+  const hybridReady =
+    provider !== "hybrid" ||
+    ((wd14.script_path != null && wd14.script_path !== "") && joyCaptionReady);
 
   // Listen for install progress events
   useEffect(() => {
@@ -145,15 +157,39 @@ export function AiPanel() {
           model,
           effectivePrompt
         );
-      } else {
-        return generateCaptionJoyCaption(
+      }
+      if (provider === "wd14") {
+        return generateCaptionWd14(
+          selectedImage.path,
+          wd14.python_path,
+          wd14.script_path
+        );
+      }
+      if (provider === "hybrid") {
+        const wd14Result = await generateCaptionWd14(
+          selectedImage.path,
+          wd14.python_path,
+          wd14.script_path
+        );
+        const joyResult = await generateCaptionJoyCaption(
           selectedImage.path,
           joyCaption.python_path,
           joyCaption.script_path,
           joyCaption.mode,
           joyCaption.low_vram
         );
+        const wd14Tags = wd14Result.success && wd14Result.caption ? wd14Result.caption.trim() : "";
+        const joyCaptionText = joyResult.success && joyResult.caption ? joyResult.caption.trim() : "";
+        const merged = [wd14Tags, joyCaptionText].filter(Boolean).join(", ");
+        return { success: !!merged, caption: merged, error: null as string | null };
       }
+      return generateCaptionJoyCaption(
+        selectedImage.path,
+        joyCaption.python_path,
+        joyCaption.script_path,
+        joyCaption.mode,
+        joyCaption.low_vram
+      );
     },
     onSuccess: (result) => {
       if (result?.success) {
@@ -191,46 +227,74 @@ export function AiPanel() {
     cancelBatchRef.current = false;
 
     try {
-      // JoyCaption batch loads model once per chunk; use larger chunks. LM Studio is sequential.
-      const chunkSize = provider === "joycaption" ? 20 : 5;
-      for (let i = 0; i < targetImages.length; i += chunkSize) {
-        if (cancelBatchRef.current) break;
-
-        const chunk = targetImages.slice(i, i + chunkSize);
-        const paths = chunk.map((img) => img.path);
-
-        let results;
-        if (provider === "lm_studio" || provider === "ollama") {
-          const baseUrl = provider === "ollama" ? ollama.base_url : lmStudio.base_url;
-          const model = provider === "ollama" ? ollama.model : lmStudio.model;
-          results = await generateCaptionsBatch(
-            paths,
-            baseUrl,
-            model,
-            effectivePrompt
-          );
-        } else {
-          results = await generateCaptionsJoyCaptionBatch(
-            paths,
-            joyCaption.python_path,
-            joyCaption.script_path,
-            joyCaption.mode,
-            joyCaption.low_vram
-          );
-        }
-
-        // Save successful captions
-        for (const result of results) {
-          if (result.success && result.caption) {
-            const tags = result.caption
-              .split(",")
-              .map((t) => t.trim())
-              .filter((t) => t);
-            await writeCaption(result.path, tags);
+      if (provider === "wd14" || provider === "hybrid") {
+        // WD14 and Hybrid: no batch API, process one image at a time
+        for (let i = 0; i < targetImages.length; i++) {
+          if (cancelBatchRef.current) break;
+          const img = targetImages[i];
+          let caption = "";
+          if (provider === "wd14") {
+            const result = await generateCaptionWd14(img.path, wd14.python_path, wd14.script_path);
+            if (result.success && result.caption) caption = result.caption;
+          } else {
+            const wd14Result = await generateCaptionWd14(img.path, wd14.python_path, wd14.script_path);
+            const joyResult = await generateCaptionJoyCaption(
+              img.path,
+              joyCaption.python_path,
+              joyCaption.script_path,
+              joyCaption.mode,
+              joyCaption.low_vram
+            );
+            const wd14Tags = wd14Result.success && wd14Result.caption ? wd14Result.caption.trim() : "";
+            const joyText = joyResult.success && joyResult.caption ? joyResult.caption.trim() : "";
+            caption = [wd14Tags, joyText].filter(Boolean).join(", ");
           }
+          if (caption) {
+            const tags = caption.split(",").map((t) => t.trim()).filter((t) => t);
+            await writeCaption(img.path, tags);
+          }
+          setGenerationProgress(i + 1, targetImages.length);
         }
+      } else {
+        const chunkSize = provider === "joycaption" ? 20 : 5;
+        for (let i = 0; i < targetImages.length; i += chunkSize) {
+          if (cancelBatchRef.current) break;
 
-        setGenerationProgress(Math.min(i + chunkSize, targetImages.length), targetImages.length);
+          const chunk = targetImages.slice(i, i + chunkSize);
+          const paths = chunk.map((img) => img.path);
+
+          let results;
+          if (provider === "lm_studio" || provider === "ollama") {
+            const baseUrl = provider === "ollama" ? ollama.base_url : lmStudio.base_url;
+            const model = provider === "ollama" ? ollama.model : lmStudio.model;
+            results = await generateCaptionsBatch(
+              paths,
+              baseUrl,
+              model,
+              effectivePrompt
+            );
+          } else {
+            results = await generateCaptionsJoyCaptionBatch(
+              paths,
+              joyCaption.python_path,
+              joyCaption.script_path,
+              joyCaption.mode,
+              joyCaption.low_vram
+            );
+          }
+
+          for (const result of results) {
+            if (result.success && result.caption) {
+              const tags = result.caption
+                .split(",")
+                .map((t) => t.trim())
+                .filter((t) => t);
+              await writeCaption(result.path, tags);
+            }
+          }
+
+          setGenerationProgress(Math.min(i + chunkSize, targetImages.length), targetImages.length);
+        }
       }
     } finally {
       cancelBatchRef.current = false;
@@ -277,11 +341,11 @@ export function AiPanel() {
       {/* Provider selector */}
       <div className="border-b border-border p-3">
         <label className="mb-1 block text-xs text-gray-500">AI Provider</label>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => setProvider("lm_studio")}
-            className={`flex-1 rounded py-2 text-sm font-medium ${
+            className={`min-w-[6rem] flex-1 shrink-0 whitespace-nowrap rounded px-2 py-2 text-xs font-medium ${
               provider === "lm_studio"
                 ? "bg-purple-600 text-white"
                 : "bg-gray-700 text-gray-300 hover:bg-gray-600"
@@ -292,7 +356,7 @@ export function AiPanel() {
           <button
             type="button"
             onClick={() => setProvider("ollama")}
-            className={`flex-1 rounded py-2 text-sm font-medium ${
+            className={`min-w-[6rem] flex-1 shrink-0 whitespace-nowrap rounded px-2 py-2 text-xs font-medium ${
               provider === "ollama"
                 ? "bg-purple-600 text-white"
                 : "bg-gray-700 text-gray-300 hover:bg-gray-600"
@@ -302,8 +366,30 @@ export function AiPanel() {
           </button>
           <button
             type="button"
+            onClick={() => setProvider("wd14")}
+            className={`min-w-[6rem] flex-1 shrink-0 whitespace-nowrap rounded px-2 py-2 text-xs font-medium ${
+              provider === "wd14"
+                ? "bg-purple-600 text-white"
+                : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+            }`}
+          >
+            WD14
+          </button>
+          <button
+            type="button"
+            onClick={() => setProvider("hybrid")}
+            className={`min-w-[6rem] flex-1 shrink-0 whitespace-nowrap rounded px-2 py-2 text-xs font-medium ${
+              provider === "hybrid"
+                ? "bg-purple-600 text-white"
+                : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+            }`}
+          >
+            Hybrid
+          </button>
+          <button
+            type="button"
             onClick={() => setProvider("joycaption")}
-            className={`flex-1 rounded py-2 text-sm font-medium ${
+            className={`min-w-[6rem] flex-1 shrink-0 whitespace-nowrap rounded px-2 py-2 text-xs font-medium ${
               provider === "joycaption"
                 ? "bg-purple-600 text-white"
                 : "bg-gray-700 text-gray-300 hover:bg-gray-600"
@@ -401,6 +487,76 @@ export function AiPanel() {
                 </div>
               )}
             </>
+          ) : provider === "wd14" ? (
+            <>
+              <div>
+                <label className="mb-1 block text-xs text-gray-500">Python Path</label>
+                <input
+                  type="text"
+                  value={wd14.python_path}
+                  onChange={(e) => setWd14PythonPath(e.target.value)}
+                  className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-gray-200"
+                  placeholder="python"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-gray-500">WD14 Script Path</label>
+                <input
+                  type="text"
+                  value={wd14.script_path ?? ""}
+                  onChange={(e) => setWd14ScriptPath(e.target.value || null)}
+                  className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-gray-200"
+                  placeholder="path/to/wd14_tagger.py"
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Script must accept --image &lt;path&gt; and print comma-separated tags to stdout.
+                </p>
+              </div>
+            </>
+          ) : provider === "hybrid" ? (
+            <>
+              <p className="text-xs text-gray-500">Hybrid uses WD14 (tags) + JoyCaption (description).</p>
+              <div>
+                <label className="mb-1 block text-xs text-gray-500">WD14 Script Path</label>
+                <input
+                  type="text"
+                  value={wd14.script_path ?? ""}
+                  onChange={(e) => setWd14ScriptPath(e.target.value || null)}
+                  className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-gray-200"
+                  placeholder="path/to/wd14_tagger.py"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-gray-500">JoyCaption Python / Script</label>
+                <input
+                  type="text"
+                  value={joyCaption.python_path}
+                  onChange={(e) => setJoyCaptionPythonPath(e.target.value)}
+                  className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-gray-200"
+                  placeholder="python"
+                />
+                <input
+                  type="text"
+                  value={joyCaption.script_path ?? ""}
+                  onChange={(e) => setJoyCaptionScriptPath(e.target.value || null)}
+                  className="mt-1 w-full rounded border border-border bg-surface px-2 py-1 text-sm text-gray-200"
+                  placeholder="JoyCaption script path (optional)"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-gray-500">JoyCaption Mode</label>
+                <select
+                  value={joyCaption.mode}
+                  onChange={(e) => setJoyCaptionMode(e.target.value)}
+                  className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-gray-200"
+                >
+                  <option value="descriptive">Descriptive</option>
+                  <option value="straightforward">Straightforward</option>
+                  <option value="booru">Booru Tags</option>
+                  <option value="training">Training Caption</option>
+                </select>
+              </div>
+            </>
           ) : (
             <>
               {/* JoyCaption Python Path */}
@@ -470,8 +626,8 @@ export function AiPanel() {
       {/* Custom prompt input */}
       <div className="border-b border-border p-3">
         <label className="mb-1 block text-xs text-gray-500">
-          {provider === "joycaption"
-            ? "Custom Prompt (LM Studio / Ollama only, JoyCaption uses mode)"
+          {["joycaption", "wd14", "hybrid"].includes(provider)
+            ? "Custom Prompt (LM Studio / Ollama only)"
             : "Custom Prompt"}
         </label>
         <textarea
@@ -479,7 +635,7 @@ export function AiPanel() {
           onChange={(e) => setCustomPrompt(e.target.value)}
           placeholder="Enter your custom prompt..."
           rows={3}
-          disabled={provider === "joycaption"}
+          disabled={["joycaption", "wd14", "hybrid"].includes(provider)}
           className="w-full resize-none rounded border border-border bg-surface px-2 py-1.5 text-sm text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:outline-none disabled:opacity-50"
         />
         {provider === "joycaption" && (
@@ -497,6 +653,8 @@ export function AiPanel() {
             !selectedImage ||
             ((provider === "lm_studio" || provider === "ollama") && !isConnected) ||
             (provider === "joycaption" && !joyCaptionReady) ||
+            (provider === "wd14" && !wd14Ready) ||
+            (provider === "hybrid" && !hybridReady) ||
             generateSingleMutation.isPending
           }
           className="flex w-full items-center justify-center gap-2 rounded bg-purple-600 px-3 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50"
@@ -531,7 +689,9 @@ export function AiPanel() {
             disabled={
               batchTargetCount === 0 ||
               ((provider === "lm_studio" || provider === "ollama") && !isConnected) ||
-              (provider === "joycaption" && !joyCaptionReady)
+              (provider === "joycaption" && !joyCaptionReady) ||
+              (provider === "wd14" && !wd14Ready) ||
+              (provider === "hybrid" && !hybridReady)
             }
             className="flex w-full items-center justify-center gap-2 rounded bg-gray-700 px-3 py-2 text-sm font-medium text-gray-200 hover:bg-gray-600 disabled:opacity-50"
           >

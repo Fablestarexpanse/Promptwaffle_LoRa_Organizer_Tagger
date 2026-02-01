@@ -52,3 +52,6 @@ venv/
 
 # Plans (optional local)
 *.plan.md
+
+# Archived documentation (internal dev notes)
+docs/archive/

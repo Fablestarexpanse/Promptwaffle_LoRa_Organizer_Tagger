@@ -22,6 +22,7 @@ pub fn run() {
             commands::lm_studio::generate_caption_lm_studio,
             commands::lm_studio::generate_captions_batch,
             commands::ollama::test_ollama_connection,
+            commands::wd14::generate_caption_wd14,
             commands::joycaption::generate_caption_joycaption,
             commands::joycaption::generate_captions_joycaption_batch,
             commands::export::export_dataset,

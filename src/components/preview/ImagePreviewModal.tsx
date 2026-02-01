@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Crop } from "lucide-react";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useProjectImages } from "@/hooks/useProject";
 import { useUiStore } from "@/stores/uiStore";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { getImageDataUrl } from "@/lib/tauri";
 
 interface ImagePreviewModalProps {
@@ -12,6 +13,8 @@ interface ImagePreviewModalProps {
 }
 
 export function ImagePreviewModal({ isOpen, onClose }: ImagePreviewModalProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(containerRef, isOpen);
   const selectedImage = useSelectionStore((s) => s.selectedImage);
   const setSelectedImage = useSelectionStore((s) => s.setSelectedImage);
   const { data: images = [] } = useProjectImages();
@@ -90,7 +93,7 @@ export function ImagePreviewModal({ isOpen, onClose }: ImagePreviewModalProps) {
   if (!isOpen || !selectedImage) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black">
+    <div ref={containerRef} className="fixed inset-0 z-50 flex flex-col bg-black">
       {/* Full-size single image view - header */}
       <div className="flex items-center justify-between border-b border-border bg-surface-elevated/95 px-4 py-2">
         <div className="flex items-center gap-4">
