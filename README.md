@@ -4,6 +4,8 @@ A modern, cross-platform desktop application for preparing image datasets for AI
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
+![LoRA Dataset Studio Screenshot](assets/screenshot.png)
+
 ## Features
 
 ### Image Management
