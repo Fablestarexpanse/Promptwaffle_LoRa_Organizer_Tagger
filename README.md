@@ -27,8 +27,8 @@ A desktop app for preparing image datasets for AI training (LoRA, DreamBooth, et
 ## Install & run
 
 ```bash
-git clone <your-repo-url>
-cd Joycaption_Mobile_LoRa_Organizer
+git clone https://github.com/Fablestarexpanse/Promptwaffle_LoRa_Organizer_Tagger.git
+cd Promptwaffle_LoRa_Organizer_Tagger
 npm install
 npm run tauri dev
 ```
