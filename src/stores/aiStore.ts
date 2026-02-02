@@ -32,6 +32,8 @@ interface AiState {
   lmStudio: LmStudioSettings;
   setLmStudioUrl: (url: string) => void;
   setLmStudioModel: (model: string | null) => void;
+  setLmStudioTimeoutSecs: (timeout_secs: number) => void;
+  setLmStudioMaxImageDimension: (max_image_dimension: number | null) => void;
 
   // Ollama settings
   ollama: OllamaSettings;
@@ -62,6 +64,9 @@ interface AiState {
   setBatchCaptionRatingFilter: (ratings: Set<string>) => void;
   setBatchCaptionRatingAll: (all: boolean) => void;
   toggleBatchCaptionRating: (rating: "good" | "bad" | "needs_edit") => void;
+  /** Max concurrent requests for batch (1–8, default 2). */
+  batchConcurrency: number;
+  setBatchConcurrency: (n: number) => void;
 }
 
 export const useAiStore = create<AiState>()(
@@ -102,6 +107,7 @@ export const useAiStore = create<AiState>()(
       lmStudio: {
         base_url: "http://localhost:1234",
         model: null,
+        timeout_secs: 120,
       },
       setLmStudioUrl: (url) =>
         set((state) => ({
@@ -110,6 +116,14 @@ export const useAiStore = create<AiState>()(
       setLmStudioModel: (model) =>
         set((state) => ({
           lmStudio: { ...state.lmStudio, model },
+        })),
+      setLmStudioTimeoutSecs: (timeout_secs) =>
+        set((state) => ({
+          lmStudio: { ...state.lmStudio, timeout_secs },
+        })),
+      setLmStudioMaxImageDimension: (max_image_dimension) =>
+        set((state) => ({
+          lmStudio: { ...state.lmStudio, max_image_dimension },
         })),
 
       // Ollama
@@ -169,6 +183,9 @@ export const useAiStore = create<AiState>()(
           else next.add(rating);
           return { batchCaptionRatingFilter: next, batchCaptionRatingAll: false };
         }),
+      batchConcurrency: 1,
+      setBatchConcurrency: (batchConcurrency) =>
+        set({ batchConcurrency: Math.max(1, Math.min(8, batchConcurrency)) }),
     }),
     {
       name: "lora-studio-ai-settings",
@@ -181,6 +198,7 @@ export const useAiStore = create<AiState>()(
         extraOptionIds: state.extraOptionIds,
         lmStudio: state.lmStudio,
         ollama: state.ollama,
+        batchConcurrency: state.batchConcurrency,
         promptTemplates: state.promptTemplates,
         selectedTemplateId: state.selectedTemplateId,
       }),

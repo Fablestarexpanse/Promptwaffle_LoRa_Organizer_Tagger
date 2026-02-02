@@ -82,6 +82,10 @@ export interface BatchCaptionResult {
 export interface LmStudioSettings {
   base_url: string;
   model: string | null;
+  /** Request timeout in seconds (default 120, max 600). */
+  timeout_secs?: number;
+  /** Max image dimension (longest side) before sending to AI; null = don't resize. */
+  max_image_dimension?: number | null;
 }
 
 /** Ollama settings (OpenAI-compatible API, e.g. http://localhost:11434/v1). */

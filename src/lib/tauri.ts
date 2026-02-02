@@ -190,7 +190,9 @@ export async function generateCaptionLmStudio(
   baseUrl: string,
   model: string | null,
   prompt: string,
-  maxTokens: number = 300
+  maxTokens: number = 300,
+  timeoutSecs: number = 120,
+  maxImageDimension: number | null = null
 ): Promise<CaptionResult> {
   return invoke<CaptionResult>("generate_caption_lm_studio", {
     payload: {
@@ -199,6 +201,8 @@ export async function generateCaptionLmStudio(
       model,
       prompt,
       max_tokens: maxTokens,
+      timeout_secs: timeoutSecs,
+      max_image_dimension: maxImageDimension ?? undefined,
     },
   });
 }
@@ -208,7 +212,10 @@ export async function generateCaptionsBatch(
   baseUrl: string,
   model: string | null,
   prompt: string,
-  maxTokens: number = 300
+  maxTokens: number = 300,
+  timeoutSecs: number = 120,
+  concurrency: number = 1,
+  maxImageDimension: number | null = null
 ): Promise<BatchCaptionResult[]> {
   return invoke<BatchCaptionResult[]>("generate_captions_batch", {
     payload: {
@@ -217,6 +224,9 @@ export async function generateCaptionsBatch(
       model,
       prompt,
       max_tokens: maxTokens,
+      timeout_secs: timeoutSecs,
+      max_image_dimension: maxImageDimension ?? undefined,
+      concurrency,
     },
   });
 }

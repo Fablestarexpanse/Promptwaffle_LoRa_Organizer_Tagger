@@ -50,6 +50,8 @@ export function AiPanel() {
     lmStudio,
     setLmStudioUrl,
     setLmStudioModel,
+    setLmStudioTimeoutSecs,
+    setLmStudioMaxImageDimension,
     ollama,
     setOllamaBaseUrl,
     setOllamaModel,
@@ -67,6 +69,8 @@ export function AiPanel() {
     batchCaptionRatingAll,
     setBatchCaptionRatingAll,
     toggleBatchCaptionRating,
+    batchConcurrency,
+    setBatchConcurrency,
   } = useAiStore();
 
   const selectedIds = useSelectionStore((s) => s.selectedIds);
@@ -106,11 +110,16 @@ export function AiPanel() {
 
       const baseUrl = provider === "ollama" ? ollama.base_url : lmStudio.base_url;
       const model = provider === "ollama" ? ollama.model : lmStudio.model;
+      const timeoutSecs = lmStudio.timeout_secs ?? 120;
+      const maxImageDimension = lmStudio.max_image_dimension ?? null;
       return generateCaptionLmStudio(
         selectedImage.path,
         baseUrl,
         model,
-        effectivePrompt
+        effectivePrompt,
+        300,
+        timeoutSecs,
+        maxImageDimension
       );
     },
     onSuccess: (result) => {
@@ -174,11 +183,17 @@ export function AiPanel() {
         const chunk = targetImages.slice(i, i + chunkSize);
         const paths = chunk.map((img) => img.path);
 
+        const timeoutSecs = lmStudio.timeout_secs ?? 120;
+        const maxImageDimension = lmStudio.max_image_dimension ?? null;
         const results = await generateCaptionsBatch(
           paths,
           baseUrl,
           model,
-          effectivePrompt
+          effectivePrompt,
+          300,
+          timeoutSecs,
+          batchConcurrency,
+          maxImageDimension
         );
 
         let failed = 0;
@@ -325,6 +340,49 @@ export function AiPanel() {
                 </select>
               </div>
             )}
+            <div>
+              <label className="mb-1 block text-xs text-gray-500">Request timeout (seconds)</label>
+              <select
+                value={lmStudio.timeout_secs ?? 120}
+                onChange={(e) => setLmStudioTimeoutSecs(Number(e.target.value))}
+                className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-gray-200"
+              >
+                <option value={60}>60</option>
+                <option value={120}>120</option>
+                <option value={180}>180</option>
+                <option value={300}>300</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-gray-500">Max image size for AI (px)</label>
+              <select
+                value={lmStudio.max_image_dimension ?? ""}
+                onChange={(e) =>
+                  setLmStudioMaxImageDimension(
+                    e.target.value === "" ? null : Number(e.target.value)
+                  )
+                }
+                className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-gray-200"
+              >
+                <option value="">Don't resize</option>
+                <option value={1024}>1024</option>
+                <option value={2048}>2048</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-gray-500">Batch: concurrent requests</label>
+              <select
+                value={batchConcurrency}
+                onChange={(e) => setBatchConcurrency(Number(e.target.value))}
+                className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-gray-200"
+              >
+                {[1, 2, 3].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </div>
           </>
         ) : (
           <>

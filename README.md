@@ -47,7 +47,7 @@ Output: `src-tauri/target/release/bundle/` (installers for your platform).
 
 1. **Download:** [LM Studio](https://lmstudio.ai/) — free, run LLMs locally.
 2. **Install** and open LM Studio.
-3. **Get a vision model:** Search (e.g. "llava" or "llama 3.2 vision"), download a quantized vision model (e.g. LLaVA 1.5 7B, Llama 3.2 Vision). You need a model that supports images.
+3. **Get a vision model:** Recommended: **mistralai/devstral-small-2-2512**. Search in LM Studio, download it (or another quantized vision model). You need a model that supports images.
 4. **Load the model:** In Chat / Load Model, select the model and load it.
 5. **Start server:** Open the **Local Server** tab, select your model, click **Start Server**. Default URL: `http://localhost:1234`.
 6. **In the app:** AI tab → **LM Studio** → set URL (e.g. `http://localhost:1234`) → **Test** → pick model → **Generate Caption** or **Batch**.
@@ -64,8 +64,9 @@ Output: `src-tauri/target/release/bundle/` (installers for your platform).
 
 ### Tips
 
-- Use a **vision** model (LLaVA, Llama 3.2 Vision, etc.); text-only models won’t caption images.
+- Use a **vision** model (e.g. **mistralai/devstral-small-2-2512**, LLaVA, Llama 3.2 Vision); text-only models won’t caption images.
 - **Settings → Preview AI caption before saving** lets you accept/reject before overwriting.
+- If captions time out: increase **Request timeout** in the AI panel, set **Max image size for AI** (e.g. 1024), or keep **Batch: concurrent requests** at 1.
 
 ## Usage
 
@@ -87,7 +88,7 @@ Output: `src-tauri/target/release/bundle/` (installers for your platform).
 | Zoom (preview)    | + / −           |
 | Prev/next (preview) | ← / →         |
 | Undo / redo       | Ctrl+Z / Ctrl+Y |
-| Rating 1/2/3      | 1 / 2 / 3 (when image selected) |
+| Rating 1/2/3      | 1 / 2 / 3 (grid or preview)      |
 | Help              | ?               |
 
 ## Caption format

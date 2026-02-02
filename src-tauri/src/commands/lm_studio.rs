@@ -1,7 +1,9 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use futures::stream::{self, StreamExt};
+use image::imageops::FilterType;
+use image::ImageFormat;
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::io::Cursor;
 use std::path::PathBuf;
 
 const DEFAULT_BASE_URL: &str = "http://localhost:1234";
@@ -89,10 +91,23 @@ pub struct GenerateCaptionPayload {
     pub prompt: String,
     #[serde(default = "default_max_tokens")]
     pub max_tokens: u32,
+    /// Request timeout in seconds (default 120, max 600).
+    #[serde(default = "default_timeout_secs")]
+    pub timeout_secs: u32,
+    /// If set, resize image so longest side is at most this (reduces payload and inference time).
+    #[serde(default)]
+    pub max_image_dimension: Option<u32>,
 }
 
 fn default_max_tokens() -> u32 {
     300
+}
+
+const DEFAULT_TIMEOUT_SECS: u32 = 120;
+const MAX_TIMEOUT_SECS: u32 = 600;
+
+fn default_timeout_secs() -> u32 {
+    DEFAULT_TIMEOUT_SECS
 }
 
 #[derive(Debug, Serialize)]
@@ -116,19 +131,32 @@ pub async fn generate_caption_lm_studio(
         });
     }
 
-    // Read and encode image as base64
-    let image_bytes = fs::read(&path).map_err(|e| e.to_string())?;
-    let base64_image = BASE64.encode(&image_bytes);
+    // Decode image so we can normalize to JPEG (LM Studio vision often only accepts JPEG).
+    // Optionally resize to reduce payload and inference time.
+    let img = image::open(&path).map_err(|e| e.to_string())?;
+    let (w, h) = (img.width(), img.height());
 
-    // Detect MIME type from extension
-    let mime_type = match path.extension().and_then(|e| e.to_str()) {
-        Some("png") => "image/png",
-        Some("gif") => "image/gif",
-        Some("webp") => "image/webp",
-        _ => "image/jpeg",
+    let img = if let Some(max_dim) = payload.max_image_dimension.filter(|&d| d > 0) {
+        let longest = w.max(h);
+        if longest > max_dim {
+            let scale = max_dim as f32 / longest as f32;
+            let new_w = (w as f32 * scale).round() as u32;
+            let new_h = (h as f32 * scale).round() as u32;
+            let new_w = new_w.max(1);
+            let new_h = new_h.max(1);
+            img.resize(new_w, new_h, FilterType::Triangle)
+        } else {
+            img
+        }
+    } else {
+        img
     };
 
-    let data_url = format!("data:{};base64,{}", mime_type, base64_image);
+    let mut buf = Vec::new();
+    img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Jpeg)
+        .map_err(|e| e.to_string())?;
+    let base64_image = BASE64.encode(&buf);
+    let data_url = format!("data:image/jpeg;base64,{}", base64_image);
 
     // Build request body (OpenAI-compatible format)
     let request_body = serde_json::json!({
@@ -160,22 +188,43 @@ pub async fn generate_caption_lm_studio(
         payload.base_url.trim_end_matches('/')
     );
 
+    let timeout_secs = payload.timeout_secs.min(MAX_TIMEOUT_SECS).max(1);
     let client = reqwest::Client::new();
-    let response = match client
-        .post(&url)
-        .header("Content-Type", "application/json")
-        .json(&request_body)
-        .timeout(std::time::Duration::from_secs(120))
-        .send()
-        .await
-    {
+    let do_request = || {
+        client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .timeout(std::time::Duration::from_secs(timeout_secs as u64))
+            .send()
+    };
+
+    let response = match do_request().await {
         Ok(r) => r,
         Err(e) => {
-            return Ok(CaptionResult {
-                success: false,
-                caption: String::new(),
-                error: Some(format!("Request failed: {}", e)),
-            });
+            let err_str = e.to_string();
+            let is_timeout = err_str.contains("timed out") || err_str.contains("timeout");
+            if !is_timeout {
+                return Ok(CaptionResult {
+                    success: false,
+                    caption: String::new(),
+                    error: Some(format!("Request failed: {}", e)),
+                });
+            }
+            // Retry once on timeout
+            match do_request().await {
+                Ok(r) => r,
+                Err(_) => {
+                    return Ok(CaptionResult {
+                        success: false,
+                        caption: String::new(),
+                        error: Some(format!(
+                            "Request timed out after {} seconds (tried 2 times). Try a larger timeout in settings or use smaller images.",
+                            timeout_secs
+                        )),
+                    });
+                }
+            }
         }
     };
 
@@ -229,7 +278,7 @@ pub async fn generate_caption_lm_studio(
 }
 
 fn default_batch_concurrency() -> u32 {
-    2
+    1
 }
 
 #[derive(Debug, Deserialize)]
@@ -242,6 +291,12 @@ pub struct BatchCaptionPayload {
     pub prompt: String,
     #[serde(default = "default_max_tokens")]
     pub max_tokens: u32,
+    /// Request timeout in seconds per image (default 120, max 600).
+    #[serde(default = "default_timeout_secs")]
+    pub timeout_secs: u32,
+    /// If set, resize each image so longest side is at most this.
+    #[serde(default)]
+    pub max_image_dimension: Option<u32>,
     /// Max concurrent requests (1 = sequential, 2–3 recommended).
     #[serde(default = "default_batch_concurrency")]
     pub concurrency: u32,
@@ -267,6 +322,8 @@ pub async fn generate_captions_batch(
     let model = payload.model.clone();
     let prompt = payload.prompt.clone();
     let max_tokens = payload.max_tokens;
+    let timeout_secs = payload.timeout_secs;
+    let max_image_dimension = payload.max_image_dimension;
 
     let futures = payload
         .image_paths
@@ -282,6 +339,8 @@ pub async fn generate_captions_batch(
                 model,
                 prompt,
                 max_tokens,
+                timeout_secs,
+                max_image_dimension,
             };
             async move {
                 let result = generate_caption_lm_studio(single_payload).await;

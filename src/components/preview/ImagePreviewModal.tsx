@@ -110,6 +110,18 @@ export function ImagePreviewModal({ isOpen, onClose }: ImagePreviewModalProps) {
         case "-":
           handleZoomOut();
           break;
+        case "1":
+          e.preventDefault();
+          handleRatingClick("good");
+          break;
+        case "2":
+          e.preventDefault();
+          handleRatingClick("bad");
+          break;
+        case "3":
+          e.preventDefault();
+          handleRatingClick("needs_edit");
+          break;
       }
     }
 
@@ -131,45 +143,6 @@ export function ImagePreviewModal({ isOpen, onClose }: ImagePreviewModalProps) {
           <span className="truncate text-sm text-gray-200" title={selectedImage.path}>
             {selectedImage.filename}
           </span>
-          {/* Good / Bad / Needs Edit */}
-          <div className="flex items-center gap-0.5">
-            <button
-              type="button"
-              onClick={() => handleRatingClick("good")}
-              className={`rounded p-1.5 transition-colors ${
-                selectedImage.rating === "good"
-                  ? "bg-green-600 text-white"
-                  : "text-gray-500 hover:bg-green-600/20 hover:text-green-400"
-              }`}
-              title="Good"
-            >
-              <Smile className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => handleRatingClick("bad")}
-              className={`rounded p-1.5 transition-colors ${
-                selectedImage.rating === "bad"
-                  ? "bg-red-600 text-white"
-                  : "text-gray-500 hover:bg-red-600/20 hover:text-red-400"
-              }`}
-              title="Bad"
-            >
-              <Frown className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => handleRatingClick("needs_edit")}
-              className={`rounded p-1.5 transition-colors ${
-                selectedImage.rating === "needs_edit"
-                  ? "bg-yellow-600 text-white"
-                  : "text-gray-500 hover:bg-yellow-600/20 hover:text-yellow-400"
-              }`}
-              title="Needs work"
-            >
-              <Wrench className="h-4 w-4" />
-            </button>
-          </div>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -241,6 +214,68 @@ export function ImagePreviewModal({ isOpen, onClose }: ImagePreviewModalProps) {
           className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full border border-border bg-surface-elevated/90 p-2 text-gray-400 hover:bg-white/10 hover:text-gray-200 disabled:opacity-30"
         >
           <ChevronRight className="h-8 w-8" />
+        </button>
+      </div>
+
+      {/* Rating bar - under image for easy rating while browsing */}
+      <div className="flex shrink-0 items-center justify-center gap-2 border-t border-border bg-surface-elevated/95 px-4 py-3">
+        <button
+          type="button"
+          onClick={handlePrev}
+          disabled={currentIndex <= 0}
+          className="rounded-lg border border-border bg-surface-elevated/90 p-2 text-gray-400 hover:bg-white/10 hover:text-gray-200 disabled:opacity-30"
+          title="Previous image (←)"
+        >
+          <ChevronLeft className="h-5 w-5" />
+        </button>
+        <span className="mx-2 text-sm text-gray-400">Rating:</span>
+        <button
+          type="button"
+          onClick={() => handleRatingClick("good")}
+          className={`flex items-center gap-2 rounded-lg px-4 py-2 transition-colors ${
+            selectedImage.rating === "good"
+              ? "bg-green-600 text-white"
+              : "text-gray-500 hover:bg-green-600/20 hover:text-green-400"
+          }`}
+          title="Good (1)"
+        >
+          <Smile className="h-5 w-5" />
+          <span className="text-sm font-medium">Good</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => handleRatingClick("bad")}
+          className={`flex items-center gap-2 rounded-lg px-4 py-2 transition-colors ${
+            selectedImage.rating === "bad"
+              ? "bg-red-600 text-white"
+              : "text-gray-500 hover:bg-red-600/20 hover:text-red-400"
+          }`}
+          title="Bad (2)"
+        >
+          <Frown className="h-5 w-5" />
+          <span className="text-sm font-medium">Bad</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => handleRatingClick("needs_edit")}
+          className={`flex items-center gap-2 rounded-lg px-4 py-2 transition-colors ${
+            selectedImage.rating === "needs_edit"
+              ? "bg-yellow-600 text-white"
+              : "text-gray-500 hover:bg-yellow-600/20 hover:text-yellow-400"
+          }`}
+          title="Needs work (3)"
+        >
+          <Wrench className="h-5 w-5" />
+          <span className="text-sm font-medium">Needs work</span>
+        </button>
+        <button
+          type="button"
+          onClick={handleNext}
+          disabled={currentIndex >= images.length - 1}
+          className="rounded-lg border border-border bg-surface-elevated/90 p-2 text-gray-400 hover:bg-white/10 hover:text-gray-200 disabled:opacity-30"
+          title="Next image (→)"
+        >
+          <ChevronRight className="h-5 w-5" />
         </button>
       </div>
 
