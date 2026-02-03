@@ -81,6 +81,8 @@ export interface CropImagePayload {
   rotate_degrees?: number;
   /** If true, save to a new file (keeps original). Returns new path. */
   save_as_new?: boolean;
+  /** If set, resize output to this size (square) for LoRA/training (e.g. 512 or 1024). */
+  output_size?: number | null;
 }
 
 /** Crops image. Returns new path when save_as_new is true, else undefined. */

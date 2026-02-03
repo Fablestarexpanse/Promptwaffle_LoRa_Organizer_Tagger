@@ -68,7 +68,8 @@ export function HelpModal({ isOpen, onClose }: HelpModalProps) {
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end border-t border-border px-4 py-3">
+        <div className="flex items-center justify-between border-t border-border px-4 py-3">
+          <span className="text-xs text-gray-500">v{__APP_VERSION__}</span>
           <button
             type="button"
             onClick={onClose}

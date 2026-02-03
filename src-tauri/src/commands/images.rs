@@ -54,6 +54,9 @@ pub struct CropImagePayload {
     /// If true, save cropped image to a new file (keeps original). Returns new path.
     #[serde(default)]
     pub save_as_new: bool,
+    /// If set, resize output to this size (square) for LoRA/training (e.g. 512 or 1024).
+    #[serde(default)]
+    pub output_size: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -173,6 +176,11 @@ pub fn crop_image(payload: CropImagePayload) -> Result<Option<String>, String> {
         out_img = out_img.rotate90();
     }
 
+    // Optional: resize to training size (square) for LoRA
+    if let Some(sz) = payload.output_size.filter(|&s| s >= 64 && s <= 2048) {
+        out_img = out_img.resize(sz, sz, FilterType::Triangle);
+    }
+
     let format = ImageFormat::from_path(&path).unwrap_or(ImageFormat::Png);
     let ext = path
         .extension()
@@ -204,7 +212,16 @@ pub fn crop_image(payload: CropImagePayload) -> Result<Option<String>, String> {
         .write_to(&mut file, format)
         .map_err(|e| e.to_string())?;
 
-    // When saving as new, do NOT copy the caption — new image gets blank tags
+    // When saving as new, copy the source caption to the new image so LoRA workflow keeps tags
+    if payload.save_as_new {
+        let caption_path = path.with_extension("txt");
+        if caption_path.exists() {
+            if let Ok(content) = fs::read_to_string(&caption_path) {
+                let out_txt = out_path.with_extension("txt");
+                let _ = fs::write(out_txt, content.trim());
+            }
+        }
+    }
 
     Ok(if payload.save_as_new {
         Some(out_path.to_string_lossy().into_owned())
