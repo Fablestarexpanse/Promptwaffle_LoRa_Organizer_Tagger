@@ -1,13 +1,9 @@
 import { useRef, useEffect, useCallback, useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useProjectImages } from "@/hooks/useProject";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useFilterStore } from "@/stores/filterStore";
-import { useProjectStore } from "@/stores/projectStore";
 import { useAiStore } from "@/stores/aiStore";
-import { setImageRating } from "@/lib/tauri";
 import { ThumbnailCell } from "./ThumbnailCell";
-import type { ImageRating } from "@/types";
 
 const MIN_THUMB_SIZE = 200;
 const GAP = 12;
@@ -30,7 +26,6 @@ export function ImageGrid() {
   const selectedImage = useSelectionStore((s) => s.selectedImage);
   const setSelectedImage = useSelectionStore((s) => s.setSelectedImage);
   const selectedIds = useSelectionStore((s) => s.selectedIds);
-  const rootPath = useProjectStore((s) => s.rootPath);
   const batchCaptionRatingFilter = useAiStore((s) => s.batchCaptionRatingFilter);
   const batchCaptionRatingAll = useAiStore((s) => s.batchCaptionRatingAll);
 
@@ -50,25 +45,6 @@ export function ImageGrid() {
     }
     return new Set(base.map((img) => img.id));
   }, [allImages, selectedIds, batchCaptionRatingFilter, batchCaptionRatingAll]);
-  const queryClient = useQueryClient();
-
-  const invalidateProject = useCallback(() => {
-    if (rootPath) {
-      queryClient.invalidateQueries({ queryKey: ["project", "images", rootPath] });
-    }
-  }, [queryClient, rootPath]);
-
-  const ratingMutation = useMutation({
-    mutationFn: async ({
-      relative_path,
-      rating,
-    }: { relative_path: string; rating: ImageRating }) => {
-      if (!rootPath) throw new Error("No project open");
-      return setImageRating(rootPath, relative_path, rating);
-    },
-    onSuccess: invalidateProject,
-  });
-
   // Update column count based on container width
   useEffect(() => {
     const container = gridRef.current;
@@ -159,32 +135,13 @@ export function ImageGrid() {
     return images.findIndex((img) => img.id === selectedImage.id);
   }, [selectedImage, images]);
 
-  // Keyboard navigation and rating shortcuts
+  // Keyboard navigation (1/2/3 rating is handled globally in App via useRatingShortcuts)
   const handleKeyNav = useCallback(
     (e: KeyboardEvent) => {
       if (
         document.activeElement?.tagName === "INPUT" ||
         document.activeElement?.tagName === "TEXTAREA"
       ) {
-        return;
-      }
-
-      // Rating shortcuts: 1 = good, 2 = bad, 3 = needs_edit (ergonomic, left hand)
-      const ratingKey = e.key;
-      if (
-        (ratingKey === "1" || ratingKey === "2" || ratingKey === "3") &&
-        selectedImage &&
-        rootPath
-      ) {
-        const rating: ImageRating =
-          ratingKey === "1" ? "good" : ratingKey === "2" ? "bad" : "needs_edit";
-        e.preventDefault();
-        const currentRating = selectedImage.rating;
-        const newRating = currentRating === rating ? "none" : rating;
-        ratingMutation.mutate({
-          relative_path: selectedImage.relative_path,
-          rating: newRating as ImageRating,
-        });
         return;
       }
 
@@ -228,15 +185,7 @@ export function ImageGrid() {
           break;
       }
     },
-    [
-      images,
-      selectedIndex,
-      setSelectedImage,
-      columnCount,
-      selectedImage,
-      rootPath,
-      ratingMutation,
-    ]
+    [images, selectedIndex, setSelectedImage, columnCount]
   );
 
   useEffect(() => {

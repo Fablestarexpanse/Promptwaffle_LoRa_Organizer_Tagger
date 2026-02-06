@@ -369,13 +369,25 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
       onDoubleClick={handleDoubleClick}
       onKeyDown={handleKeyDown}
       className={`group relative flex cursor-pointer flex-col rounded border-2 transition-colors ${
-        isInCaptionBatch
-          ? "border-green-500 bg-green-500/15"
-          : isSelected
-            ? "border-blue-500 bg-blue-500/10"
-            : isMultiSelected
-              ? "border-purple-500 bg-purple-500/10"
-              : "border-border bg-surface-elevated hover:border-gray-500"
+        isMultiSelected
+          ? "border-purple-500 bg-purple-500/10"
+          : isInCaptionBatch
+            ? "border-green-500 bg-green-500/15"
+            : entry.rating === "good"
+              ? isSelected
+                ? "border-green-500 bg-green-500/15"
+                : "border-green-500 bg-green-500/5 hover:bg-green-500/10"
+              : entry.rating === "bad"
+                ? isSelected
+                  ? "border-red-500 bg-red-500/15"
+                  : "border-red-500 bg-red-500/5 hover:bg-red-500/10"
+                : entry.rating === "needs_edit"
+                  ? isSelected
+                    ? "border-amber-500 bg-amber-500/15"
+                    : "border-amber-500 bg-amber-500/5 hover:bg-amber-500/10"
+                  : isSelected
+                    ? "border-blue-500 bg-blue-500/10"
+                    : "border-border bg-surface-elevated hover:border-gray-500"
       }`}
     >
       {/* Multi-select indicator */}
@@ -402,8 +414,18 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
 
       {/* Thumbnail */}
       <div
-        className="flex aspect-square w-full shrink-0 items-center justify-center bg-gray-800/50"
+        className="relative flex aspect-square w-full shrink-0 items-center justify-center bg-gray-800/50"
       >
+        {/* View larger - always visible top-left on image */}
+        <button
+          type="button"
+          onClick={handleViewLarger}
+          className="absolute left-1 top-1 z-10 rounded p-1 bg-black/50 text-gray-200 hover:bg-black/70"
+          title="View larger"
+          aria-label="View larger"
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+        </button>
         {isLoading && <span className="text-xs text-gray-500">…</span>}
         {isError && <span className="text-xs text-red-400">Err</span>}
         {src && (
@@ -417,7 +439,7 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
         )}
       </div>
 
-      {/* Rating icons, Generate caption, View larger, Crop, Delete, Clear tags */}
+      {/* Rating icons, Generate caption, Crop, Delete, Clear tags (View larger is on image top-left) */}
       <div className="flex flex-wrap items-center justify-center gap-0.5 px-0.5 py-1">
         <button
           type="button"
@@ -471,14 +493,6 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
           ) : (
             <Sparkles className="h-3.5 w-3.5" />
           )}
-        </button>
-        <button
-          type="button"
-          onClick={handleViewLarger}
-          className="rounded p-0.5 text-gray-500 hover:bg-white/10 hover:text-gray-200"
-          title="View larger"
-        >
-          <Maximize2 className="h-3.5 w-3.5" />
         </button>
         <button
           type="button"

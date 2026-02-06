@@ -23,7 +23,6 @@ import {
   writeCaption,
 } from "@/lib/tauri";
 import { buildEffectivePrompt } from "@/lib/promptBuilder";
-import { DEFAULT_EXTRA_OPTIONS } from "@/types";
 
 export function AiPanel() {
   const [previewCaption, setPreviewCaption] = useState<string | null>(null);
@@ -46,7 +45,6 @@ export function AiPanel() {
     setWordCount,
     setLength,
     setCharacterName,
-    toggleExtraOption,
     lmStudio,
     setLmStudioUrl,
     setLmStudioModel,
@@ -498,29 +496,6 @@ export function AiPanel() {
         </div>
       </div>
 
-      {/* Extra options */}
-      <div className="border-b border-border p-3">
-        <label className="mb-1 block text-xs text-gray-500">Extra options</label>
-        <div className="max-h-40 overflow-y-auto overflow-x-hidden rounded border border-border bg-surface/50 p-2 pr-3">
-          <div className="grid grid-cols-1 gap-y-1.5 sm:grid-cols-2">
-            {DEFAULT_EXTRA_OPTIONS.map((opt) => (
-              <label
-                key={opt.id}
-                className="flex cursor-pointer items-start gap-2 text-xs text-gray-300 hover:text-gray-200"
-              >
-                <input
-                  type="checkbox"
-                  checked={extraOptionIds.includes(opt.id)}
-                  onChange={() => toggleExtraOption(opt.id)}
-                  className="mt-0.5 shrink-0 rounded border-gray-600"
-                />
-                <span className="break-words" title={opt.label}>{opt.label}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-      </div>
-
       {/* Prompt used (read-only) */}
       <details className="border-b border-border group">
         <summary className="cursor-pointer px-3 py-2 text-xs text-gray-500 hover:text-gray-400">
@@ -552,21 +527,40 @@ export function AiPanel() {
             />
             <span>All</span>
           </label>
-          {(["good", "bad", "needs_edit"] as const).map((r) => (
-            <label
-              key={r}
-              className="flex cursor-pointer items-center gap-1.5 rounded border border-border bg-surface px-2 py-1.5 text-xs text-gray-300 hover:bg-white/5"
-            >
-              <input
-                type="checkbox"
-                checked={!batchCaptionRatingAll && batchCaptionRatingFilter.has(r)}
-                onChange={() => toggleBatchCaptionRating(r)}
-                disabled={batchCaptionRatingAll}
-                className="rounded border-gray-600 disabled:opacity-50"
-              />
-              <span className="capitalize">{r.replace("_", " ")}</span>
-            </label>
-          ))}
+          {(["good", "bad", "needs_edit"] as const).map((r) => {
+            const checked = !batchCaptionRatingAll && batchCaptionRatingFilter.has(r);
+            const ratingStyles =
+              r === "good"
+                ? "border-green-500 hover:bg-green-500/10"
+                : r === "bad"
+                  ? "border-red-500 hover:bg-red-500/10"
+                  : "border-amber-500 hover:bg-amber-500/10";
+            const checkedStyles =
+              r === "good"
+                ? "border-green-500 bg-green-500/20 text-green-300"
+                : r === "bad"
+                  ? "border-red-500 bg-red-500/20 text-red-300"
+                  : "border-amber-500 bg-amber-500/20 text-amber-300";
+            return (
+              <label
+                key={r}
+                className={`flex cursor-pointer items-center gap-1.5 rounded border px-2 py-1.5 text-xs ${
+                  checked
+                    ? checkedStyles
+                    : `${ratingStyles} bg-surface text-gray-300`
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggleBatchCaptionRating(r)}
+                  disabled={batchCaptionRatingAll}
+                  className="rounded border-gray-600 disabled:opacity-50"
+                />
+                <span className="capitalize">{r.replace("_", " ")}</span>
+              </label>
+            );
+          })}
         </div>
         <p className="mt-2 text-[10px] leading-relaxed text-gray-500">
           All = every image in project (re-caption). Otherwise: selected/uncaptioned + rating.

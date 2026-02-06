@@ -2,7 +2,7 @@
 
 A desktop app for preparing image datasets for AI training (LoRA, DreamBooth, etc.). Tag and caption images, use local AI (LM Studio or Ollama), and export to folder or ZIP.
 
-![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)
+![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
 ![LoRA Dataset Studio — main window](assets/screenshot.png)

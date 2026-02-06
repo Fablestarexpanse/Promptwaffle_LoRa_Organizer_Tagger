@@ -8,12 +8,14 @@ import { CropModal } from "./components/preview/CropModal";
 import { ProjectLoadOverlay } from "./components/project/ProjectLoadOverlay";
 import { RestorePreviousFolderPrompt } from "./components/project/RestorePreviousFolderPrompt";
 import { useUiStore } from "./stores/uiStore";
+import { useRatingShortcuts } from "./hooks/useRatingShortcuts";
 
 function App() {
   const isPreviewOpen = useUiStore((s) => s.isPreviewOpen);
   const closePreview = useUiStore((s) => s.closePreview);
 
-  // Global keyboard shortcuts
+  useRatingShortcuts();
+
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       // ? to open help

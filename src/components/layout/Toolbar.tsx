@@ -2,6 +2,7 @@ import { useState } from "react";
 import { FolderOpen, Download, FileEdit, Maximize2, Settings, HelpCircle, Eraser, StarOff } from "lucide-react";
 import { useProjectStore } from "@/stores/projectStore";
 import { useUiStore } from "@/stores/uiStore";
+import { useSelectionStore } from "@/stores/selectionStore";
 import { openFolder } from "@/lib/tauri";
 import { ExportModal } from "../export/ExportModal";
 import { BatchRenameModal } from "../rename/BatchRenameModal";
@@ -17,6 +18,16 @@ export function Toolbar() {
   const setIsLoadingProject = useProjectStore((s) => s.setIsLoadingProject);
   const setLastOpenedFolder = useProjectStore((s) => s.setLastOpenedFolder);
   const showToast = useUiStore((s) => s.showToast);
+  const selectedImage = useSelectionStore((s) => s.selectedImage);
+
+  const ratingBorderClass =
+    selectedImage?.rating === "good"
+      ? "border-b-green-500"
+      : selectedImage?.rating === "bad"
+        ? "border-b-red-500"
+        : selectedImage?.rating === "needs_edit"
+          ? "border-b-amber-500"
+          : "border-b-border";
 
   const [showExport, setShowExport] = useState(false);
   const [showBatchRename, setShowBatchRename] = useState(false);
@@ -43,7 +54,9 @@ export function Toolbar() {
 
   return (
     <>
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-surface-elevated px-3">
+      <header
+        className={`flex h-12 shrink-0 items-center gap-2 border-b-2 border-border bg-surface-elevated px-3 ${ratingBorderClass}`}
+      >
         {/* Open */}
         <button
           type="button"
