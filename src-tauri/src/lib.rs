@@ -13,6 +13,7 @@ pub fn run() {
             commands::images::get_thumbnail,
             commands::images::get_image_data_url,
             commands::images::crop_image,
+            commands::images::multi_crop,
             commands::images::batch_resize,
             commands::images::delete_image,
             commands::captions::read_caption,
@@ -30,7 +31,11 @@ pub fn run() {
             commands::ratings::set_rating,
             commands::ratings::get_ratings,
             commands::ratings::clear_all_ratings,
+            commands::crop_status::set_crop_status,
+            commands::crop_status::get_crop_statuses,
+            commands::crop_status::clear_all_crop_statuses,
             commands::batch_rename::batch_rename,
+            commands::detect::detect_faces,
         ])
         .run(tauri::generate_context!())
         .expect("error while running LoRA Dataset Studio");

@@ -359,3 +359,105 @@ pub fn delete_image(image_path: String) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[derive(Debug, Deserialize)]
+pub struct CropRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+    pub suffix: String, // "_full", "_med", "_close"
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MultiCropPayload {
+    pub image_path: String,
+    pub crops: Vec<CropRect>,
+    #[serde(default)]
+    pub flip_x: bool,
+    #[serde(default)]
+    pub flip_y: bool,
+    #[serde(default)]
+    pub rotate_degrees: i32,
+    #[serde(default)]
+    pub output_size: Option<u32>,
+}
+
+/// Crop an image multiple times with different regions, saving each with a suffix.
+/// Returns Vec of output paths.
+#[tauri::command]
+pub fn multi_crop(payload: MultiCropPayload) -> Result<Vec<String>, String> {
+    let path = PathBuf::from(&payload.image_path);
+    if !path.exists() || !path.is_file() {
+        return Err("Image file not found".to_string());
+    }
+
+    let img = image::open(&path).map_err(|e| e.to_string())?;
+    let (img_w, img_h) = (img.width(), img.height());
+    let format = ImageFormat::from_path(&path).unwrap_or(ImageFormat::Png);
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png");
+    let parent = path.parent().unwrap_or_else(|| path.as_path());
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("image");
+
+    let mut output_paths = Vec::new();
+
+    for crop in &payload.crops {
+        let x = crop.x.min(img_w.saturating_sub(1));
+        let y = crop.y.min(img_h.saturating_sub(1));
+        let cw = crop.width.min(img_w.saturating_sub(x));
+        let ch = crop.height.min(img_h.saturating_sub(y));
+
+        if cw == 0 || ch == 0 {
+            continue; // skip invalid crops
+        }
+
+        let cropped_sub = img.crop_imm(x, y, cw, ch);
+        let mut out_img = image::DynamicImage::from(cropped_sub.to_rgb8());
+
+        if payload.flip_x {
+            out_img = out_img.fliph();
+        }
+        if payload.flip_y {
+            out_img = out_img.flipv();
+        }
+
+        let rot = ((payload.rotate_degrees % 360 + 360) % 360) / 90;
+        for _ in 0..rot {
+            out_img = out_img.rotate90();
+        }
+
+        if let Some(sz) = payload.output_size.filter(|&s| s >= 64 && s <= 2048) {
+            out_img = out_img.resize(sz, sz, FilterType::Triangle);
+        }
+
+        let out_name = format!("{}{}.{}", stem, crop.suffix, ext);
+        let out_path = parent.join(&out_name);
+
+        let mut file = std::io::BufWriter::new(
+            std::fs::File::create(&out_path).map_err(|e| e.to_string())?,
+        );
+        out_img
+            .write_to(&mut file, format)
+            .map_err(|e| e.to_string())?;
+
+        // Copy caption to new file with suffix
+        let caption_path = path.with_extension("txt");
+        if caption_path.exists() {
+            if let Ok(content) = fs::read_to_string(&caption_path) {
+                let out_txt = out_path.with_extension("txt");
+                let _ = fs::write(out_txt, content.trim());
+            }
+        }
+
+        output_paths.push(out_path.to_string_lossy().into_owned());
+    }
+
+    if output_paths.is_empty() {
+        return Err("No valid crops processed".to_string());
+    }
+
+    Ok(output_paths)
+}

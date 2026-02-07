@@ -1,5 +1,7 @@
 pub mod batch_rename;
 pub mod captions;
+pub mod crop_status;
+pub mod detect;
 pub mod export;
 pub mod images;
 pub mod lm_studio;

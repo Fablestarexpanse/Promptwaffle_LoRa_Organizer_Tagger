@@ -1,6 +1,18 @@
 /** Image rating status. */
 export type ImageRating = "none" | "good" | "bad" | "needs_edit";
 
+/** Crop status for dataset preparation tracking. */
+export type CropStatus = "uncropped" | "cropped" | "multi" | "flagged";
+
+/** Face detection region. */
+export interface FaceRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  confidence: number;
+}
+
 /** Image entry as returned from open_project (list). */
 export interface ImageEntry {
   id: string;
@@ -10,6 +22,7 @@ export interface ImageEntry {
   has_caption: boolean;
   tags: string[];
   rating: ImageRating;
+  crop_status?: CropStatus;
   width?: number;
   height?: number;
   file_size?: number;

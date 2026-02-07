@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   X,
@@ -15,8 +15,12 @@ import { useSelectionStore } from "@/stores/selectionStore";
 import { useProjectImages } from "@/hooks/useProject";
 import { useProjectStore } from "@/stores/projectStore";
 import { useUiStore } from "@/stores/uiStore";
+import { useCropStore } from "@/stores/cropStore";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
-import { cropImage, getImageDataUrl } from "@/lib/tauri";
+import { cropImage, getImageDataUrl, detectFaces, multiCrop, setCropStatus } from "@/lib/tauri";
+import type { CropRect } from "@/lib/tauri";
+import { computeBuckets, BUILTIN_PROFILES } from "@/lib/buckets";
+import type { FaceRegion } from "@/types";
 
 const HANDLE_SIZE = 14;
 
@@ -35,19 +39,6 @@ interface DragState {
   startH: number;
 }
 
-const ASPECT_RATIOS: { label: string; value: number }[] = [
-  { label: "1:1", value: 1 },
-  { label: "5:4", value: 5 / 4 },
-  { label: "4:5", value: 4 / 5 },
-  { label: "4:3", value: 4 / 3 },
-  { label: "3:4", value: 3 / 4 },
-  { label: "3:2", value: 3 / 2 },
-  { label: "2:3", value: 2 / 3 },
-  { label: "16:9", value: 16 / 9 },
-  { label: "9:16", value: 9 / 16 },
-  { label: "2:1", value: 2 },
-  { label: "1:2", value: 0.5 },
-];
 
 export function CropModal() {
   const selectedImage = useSelectionStore((s) => s.selectedImage);
@@ -56,6 +47,12 @@ export function CropModal() {
   const rootPath = useProjectStore((s) => s.rootPath);
   const queryClient = useQueryClient();
   const { data: images = [] } = useProjectImages();
+  
+  const selectedProfile = useCropStore((s) => s.selectedProfile);
+  const setSelectedProfile = useCropStore((s) => s.setSelectedProfile);
+  const customProfiles = useCropStore((s) => s.customProfiles);
+  const allProfiles = useMemo(() => [...BUILTIN_PROFILES, ...customProfiles], [customProfiles]);
+  const buckets = useMemo(() => computeBuckets(selectedProfile), [selectedProfile]);
 
   const currentIndex = selectedImage
     ? images.findIndex((img) => img.id === selectedImage.id)
@@ -67,6 +64,25 @@ export function CropModal() {
 
   function handleNext() {
     if (currentIndex < images.length - 1) setSelectedImage(images[currentIndex + 1]);
+  }
+
+  function handleNextUncropped() {
+    // Find next image without crop_status or with status "uncropped"
+    for (let i = currentIndex + 1; i < images.length; i++) {
+      const img = images[i];
+      if (!img.crop_status || img.crop_status === "uncropped") {
+        setSelectedImage(img);
+        return;
+      }
+    }
+    // If no uncropped found after current, wrap to beginning
+    for (let i = 0; i <= currentIndex; i++) {
+      const img = images[i];
+      if (!img.crop_status || img.crop_status === "uncropped") {
+        setSelectedImage(img);
+        return;
+      }
+    }
   }
 
   function handleCenterSquare() {
@@ -93,12 +109,13 @@ export function CropModal() {
   const [flipX, setFlipX] = useState(false);
   const [flipY, setFlipY] = useState(false);
   const [rotateDeg, setRotateDeg] = useState(0);
-  const [expandFromCenter, setExpandFromCenter] = useState(false);
   const [highlight, setHighlight] = useState(true);
-  const [saveAsNew, setSaveAsNew] = useState(false);
+  const [saveAsNew, setSaveAsNew] = useState(true);
   const [outputSize, setOutputSize] = useState<number | null>(null);
-  const [guideType, setGuideType] = useState<"none" | "thirds" | "crosshair">("none");
+  const [guideType] = useState<"none" | "thirds" | "crosshair">("none");
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [cropMode, setCropMode] = useState<"manual" | "center" | "face">("manual");
+  const [detectedFaces, setDetectedFaces] = useState<FaceRegion[]>([]);
 
   const imageContainerRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -114,6 +131,32 @@ export function CropModal() {
     enabled: isOpen && !!selectedImage?.path,
     staleTime: 2 * 60 * 1000,
   });
+
+  // Face detection query (only runs when face mode is active)
+  const { data: faces, isLoading: facesLoading } = useQuery({
+    queryKey: ["faces", selectedImage?.path],
+    queryFn: () => detectFaces(selectedImage!.path),
+    enabled: isOpen && !!selectedImage && cropMode === "face",
+    staleTime: Infinity, // cache forever per image
+  });
+
+  // Update detected faces when query completes
+  useEffect(() => {
+    if (faces) {
+      setDetectedFaces(faces);
+      // Auto-center on largest face
+      if (faces.length > 0) {
+        const largest = faces[0]; // already sorted by confidence
+        const centerX = largest.x + largest.width / 2;
+        const centerY = largest.y + largest.height / 2;
+        // Position crop to center on face
+        const newX = Math.max(0, Math.floor(centerX - w / 2));
+        const newY = Math.max(0, Math.floor(centerY - h / 2));
+        setX(Math.min(newX, imgWidth - w));
+        setY(Math.min(newY, imgHeight - h));
+      }
+    }
+  }, [faces, imgWidth, imgHeight, w, h]);
 
   // Reset state and set dimensions from entry when opening (use original image dimensions for crop)
   useEffect(() => {
@@ -322,8 +365,6 @@ export function CropModal() {
       const { imgX, imgY } = coords;
       const { mode, handle, startImgX, startImgY, startX, startY, startW, startH } =
         dragState;
-      const centerX = startX + startW / 2;
-      const centerY = startY + startH / 2;
 
       if (mode === "draw") {
         const nx = Math.min(startImgX, imgX);
@@ -342,64 +383,7 @@ export function CropModal() {
         setY(Math.round(ny));
       } else if (mode === "resize" && handle) {
         let nx: number, ny: number, nw: number, nh: number;
-        if (expandFromCenter) {
-          // Symmetric expand: center stays fixed, cursor defines that edge/corner; opposite side mirrors
-          const cx = centerX;
-          const cy = centerY;
-          switch (handle) {
-            case "se":
-              nw = 2 * (imgX - cx);
-              nh = 2 * (imgY - cy);
-              nx = cx - nw / 2;
-              ny = cy - nh / 2;
-              break;
-            case "sw":
-              nw = 2 * (cx - imgX);
-              nh = 2 * (imgY - cy);
-              nx = imgX;
-              ny = cy - nh / 2;
-              break;
-            case "ne":
-              nw = 2 * (imgX - cx);
-              nh = 2 * (cy - imgY);
-              nx = cx - nw / 2;
-              ny = imgY;
-              break;
-            case "nw":
-              nw = 2 * (cx - imgX);
-              nh = 2 * (cy - imgY);
-              nx = imgX;
-              ny = imgY;
-              break;
-            case "e":
-              nw = 2 * (imgX - cx);
-              nx = cx - nw / 2;
-              ny = startY;
-              nh = startH;
-              break;
-            case "w":
-              nw = 2 * (cx - imgX);
-              nx = imgX;
-              ny = startY;
-              nh = startH;
-              break;
-            case "s":
-              nh = 2 * (imgY - cy);
-              ny = cy - nh / 2;
-              nx = startX;
-              nw = startW;
-              break;
-            case "n":
-              nh = 2 * (cy - imgY);
-              ny = imgY;
-              nx = startX;
-              nw = startW;
-              break;
-            default:
-              return;
-          }
-        } else {
-          switch (handle) {
+        switch (handle) {
             case "nw":
               nx = imgX;
               ny = imgY;
@@ -451,7 +435,6 @@ export function CropModal() {
             default:
               return;
           }
-        }
         // Clamp to image and enforce min size
         nw = Math.max(1, nw);
         nh = Math.max(1, nh);
@@ -476,7 +459,6 @@ export function CropModal() {
       applyCropFromInteraction,
       imgWidth,
       imgHeight,
-      expandFromCenter,
     ]
   );
 
@@ -556,7 +538,11 @@ export function CropModal() {
         save_as_new: saveAsNew,
         output_size: outputSize ?? undefined,
       }),
-    onSuccess: () => {
+    onSuccess: async () => {
+      // Mark as cropped
+      if (rootPath && selectedImage) {
+        await setCropStatus(rootPath, selectedImage.relative_path, "cropped");
+      }
       invalidateProject();
       if (applyAndNextRef.current) {
         applyAndNextRef.current = false;
@@ -567,6 +553,61 @@ export function CropModal() {
       } else {
         closeCrop();
       }
+    },
+  });
+
+  const multiCropMutation = useMutation({
+    mutationFn: () => {
+      // Generate 3 crop regions: full, medium (cowboy), close-up
+      const crops: CropRect[] = [];
+      
+      // Full body: current crop region
+      crops.push({
+        x: Math.round(x),
+        y: Math.round(y),
+        width: Math.max(1, Math.round(w)),
+        height: Math.max(1, Math.round(h)),
+        suffix: "_full",
+      });
+      
+      // Medium (cowboy shot): upper 60% of crop
+      const medHeight = Math.round(h * 0.6);
+      crops.push({
+        x: Math.round(x),
+        y: Math.round(y),
+        width: Math.max(1, Math.round(w)),
+        height: Math.max(1, medHeight),
+        suffix: "_med",
+      });
+      
+      // Close-up: center 40% of crop
+      const closeSize = Math.round(Math.min(w, h) * 0.4);
+      const closeX = Math.round(x + (w - closeSize) / 2);
+      const closeY = Math.round(y + (h - closeSize) / 3); // slightly higher for face
+      crops.push({
+        x: closeX,
+        y: closeY,
+        width: Math.max(1, closeSize),
+        height: Math.max(1, closeSize),
+        suffix: "_close",
+      });
+      
+      return multiCrop({
+        image_path: selectedImage!.path,
+        crops,
+        flip_x: flipX,
+        flip_y: flipY,
+        rotate_degrees: rotateDeg,
+        output_size: outputSize ?? undefined,
+      });
+    },
+    onSuccess: async () => {
+      // Mark as multi-cropped
+      if (rootPath && selectedImage) {
+        await setCropStatus(rootPath, selectedImage.relative_path, "multi");
+      }
+      invalidateProject();
+      closeCrop();
     },
   });
 
@@ -591,6 +632,45 @@ export function CropModal() {
       <div className="flex flex-1 min-h-0">
         {/* Image area + nav bar under image */}
         <div className="flex flex-1 min-h-0 flex-col">
+          {/* Crop mode selector */}
+          <div className="flex gap-2 border-b border-border bg-surface-elevated/95 px-4 py-2">
+            <button
+              type="button"
+              onClick={() => setCropMode("manual")}
+              className={`px-3 py-1 text-sm rounded ${
+                cropMode === "manual"
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+              }`}
+            >
+              Manual
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCropMode("center");
+                handleCenterSquare();
+              }}
+              className={`px-3 py-1 text-sm rounded ${
+                cropMode === "center"
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+              }`}
+            >
+              Center
+            </button>
+            <button
+              type="button"
+              onClick={() => setCropMode("face")}
+              className={`px-3 py-1 text-sm rounded ${
+                cropMode === "face"
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+              }`}
+            >
+              Face Detect {facesLoading && <Loader2 className="inline h-3 w-3 animate-spin ml-1" />}
+            </button>
+          </div>
           <div className="relative flex flex-1 items-center justify-center overflow-auto bg-gray-900 p-4">
           {imageSrc && (
             <div
@@ -693,6 +773,27 @@ export function CropModal() {
                   )}
                 </>
               )}
+              {/* Face detection overlays */}
+              {cropMode === "face" && detectedFaces.length > 0 && imgWidth > 0 && imgHeight > 0 && (
+                <>
+                  {detectedFaces.map((face, idx) => (
+                    <div
+                      key={idx}
+                      className="pointer-events-none absolute border-2 border-green-400 bg-green-400/10"
+                      style={{
+                        left: `${(face.x / imgWidth) * 100}%`,
+                        top: `${(face.y / imgHeight) * 100}%`,
+                        width: `${(face.width / imgWidth) * 100}%`,
+                        height: `${(face.height / imgHeight) * 100}%`,
+                      }}
+                    >
+                      <div className="absolute -top-5 left-0 text-xs text-green-400 bg-black/70 px-1 rounded">
+                        Face {idx + 1} ({Math.round(face.confidence * 100)}%)
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
           )}
           </div>
@@ -718,6 +819,14 @@ export function CropModal() {
               title="Next image (→)"
             >
               <ChevronRight className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              onClick={handleNextUncropped}
+              className="ml-2 rounded border border-blue-600 bg-blue-600/20 px-3 py-1.5 text-xs font-medium text-blue-200 hover:bg-blue-600/30"
+              title="Jump to next uncropped image (N)"
+            >
+              Next Uncropped
             </button>
           </div>
         </div>
@@ -772,7 +881,7 @@ export function CropModal() {
             </div>
           </div>
 
-          <div className="text-sm font-medium text-gray-400">Fixed selection</div>
+          <div className="text-sm font-medium text-gray-400">Options</div>
           <div className="flex flex-wrap gap-2">
             <label className="flex items-center gap-2">
               <input
@@ -781,7 +890,7 @@ export function CropModal() {
                 onChange={(e) => setFixed(e.target.checked)}
                 className="rounded border-gray-600"
               />
-              <span className="text-sm text-gray-300">Fixed</span>
+              <span className="text-sm text-gray-300">Lock Ratio</span>
             </label>
             <label className="flex items-center gap-2">
               <input
@@ -795,15 +904,6 @@ export function CropModal() {
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"
-                checked={expandFromCenter}
-                onChange={(e) => setExpandFromCenter(e.target.checked)}
-                className="rounded border-gray-600"
-              />
-              <span className="text-sm text-gray-300">Expand from center</span>
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
                 checked={saveAsNew}
                 onChange={(e) => setSaveAsNew(e.target.checked)}
                 className="rounded border-gray-600"
@@ -813,33 +913,21 @@ export function CropModal() {
           </div>
 
           <div>
-            <label className="mb-1 block text-xs text-gray-500">LoRA presets</label>
-            <div className="flex flex-wrap gap-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setAspectRatio(1);
-                  setFixed(true);
-                  applyAspectRatio(1, w >= h ? "w" : "h");
-                  setOutputSize(512);
-                }}
-                className="rounded px-2 py-1 text-xs bg-gray-700 text-gray-300 hover:bg-gray-600"
-              >
-                1:1 (512)
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setAspectRatio(1);
-                  setFixed(true);
-                  applyAspectRatio(1, w >= h ? "w" : "h");
-                  setOutputSize(1024);
-                }}
-                className="rounded px-2 py-1 text-xs bg-gray-700 text-gray-300 hover:bg-gray-600"
-              >
-                1:1 (1024)
-              </button>
-            </div>
+            <label className="mb-1 block text-xs text-gray-500">Trainer Profile</label>
+            <select
+              value={selectedProfile.id}
+              onChange={(e) => {
+                const profile = allProfiles.find((p) => p.id === e.target.value);
+                if (profile) setSelectedProfile(profile);
+              }}
+              className="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-gray-200"
+            >
+              {allProfiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div>
@@ -854,7 +942,7 @@ export function CropModal() {
           </div>
 
           <div>
-            <label className="mb-1 block text-xs text-gray-500">Resize output to (square)</label>
+            <label className="mb-1 block text-xs text-gray-500">Output Resize</label>
             <select
               value={outputSize ?? ""}
               onChange={(e) =>
@@ -862,50 +950,46 @@ export function CropModal() {
               }
               className="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-gray-200"
             >
-              <option value="">None (crop size)</option>
-              <option value={512}>512×512</option>
-              <option value={768}>768×768</option>
-              <option value={1024}>1024×1024</option>
+              <option value="">Native crop size (no resize)</option>
+              <option value={512}>Resize to 512×512</option>
+              <option value={768}>Resize to 768×768</option>
+              <option value={1024}>Resize to 1024×1024</option>
             </select>
+            <p className="mt-1 text-xs text-gray-500">
+              Applied after cropping. Trainer may resize again.
+            </p>
           </div>
 
           <div>
-            <label className="mb-1 block text-xs text-gray-500">Aspect ratio</label>
-            <div className="flex flex-wrap gap-1">
-              {ASPECT_RATIOS.map(({ label, value }) => (
+            <label className="mb-1 block text-xs text-gray-500">
+              Bucket Ratios ({selectedProfile.name})
+            </label>
+            <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto">
+              {buckets.map((bucket) => (
                 <button
-                  key={label}
+                  key={`${bucket.width}x${bucket.height}`}
                   type="button"
                   onClick={() => {
-                    setAspectRatio(value);
+                    setW(bucket.width);
+                    setH(bucket.height);
+                    setAspectRatio(bucket.ratio);
                     setFixed(true);
-                    applyAspectRatio(value, w >= h ? "w" : "h");
+                    setX(Math.max(0, Math.floor((imgWidth - bucket.width) / 2)));
+                    setY(Math.max(0, Math.floor((imgHeight - bucket.height) / 2)));
                   }}
                   className={`rounded px-2 py-1 text-xs ${
-                    aspectRatio === value
+                    w === bucket.width && h === bucket.height
                       ? "bg-blue-600 text-white"
                       : "bg-gray-700 text-gray-300 hover:bg-gray-600"
                   }`}
+                  title={`${bucket.width} × ${bucket.height}`}
                 >
-                  {label}
+                  {bucket.label}
                 </button>
               ))}
             </div>
           </div>
 
-          <div>
-            <label className="mb-1 block text-xs text-gray-500">Guides</label>
-            <select
-              value={guideType}
-              onChange={(e) =>
-                setGuideType(e.target.value as "none" | "thirds" | "crosshair")}
-              className="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-gray-200"
-            >
-              <option value="none">None</option>
-              <option value="thirds">Rule of thirds</option>
-              <option value="crosshair">Crosshair</option>
-            </select>
-          </div>
 
           <div className="text-sm font-medium text-gray-400">Transform</div>
           <div className="flex flex-wrap gap-2">
@@ -915,7 +999,7 @@ export function CropModal() {
               className="flex items-center gap-1 rounded border border-border bg-surface px-2 py-1.5 text-sm text-gray-200 hover:bg-gray-700"
             >
               <RotateCw className="h-4 w-4" />
-              Rotate
+              Rotate 90°
             </button>
             <button
               type="button"
@@ -938,7 +1022,6 @@ export function CropModal() {
               Flip Y
             </button>
           </div>
-          <p className="text-xs text-gray-500">Rotate: {rotateDeg}°</p>
 
           <div className="border-t border-border pt-4 space-y-2">
             <button
@@ -955,7 +1038,7 @@ export function CropModal() {
               ) : (
                 <Crop className="h-4 w-4" />
               )}
-              {saveAsNew ? "Crop to new image" : "Crop selection (overwrite)"}
+              {saveAsNew ? "Crop to new image (safe)" : "Crop selection (⚠️ overwrite)"}
             </button>
             <button
               type="button"
@@ -971,11 +1054,32 @@ export function CropModal() {
             >
               Apply and next
             </button>
+            <button
+              type="button"
+              onClick={() => multiCropMutation.mutate()}
+              disabled={!w || !h || multiCropMutation.isPending}
+              className="flex w-full items-center justify-center gap-2 rounded border border-purple-600 bg-purple-600/20 px-4 py-2 text-sm font-medium text-purple-200 hover:bg-purple-600/30 disabled:opacity-50"
+              title="Generate 3 crops: full, medium, close-up"
+            >
+              {multiCropMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Crop className="h-4 w-4" />
+              )}
+              Multi-Crop (3 stages)
+            </button>
             {cropMutation.isError && (
               <p className="text-xs text-red-400" role="alert">
                 {cropMutation.error instanceof Error
                   ? cropMutation.error.message
                   : String(cropMutation.error)}
+              </p>
+            )}
+            {multiCropMutation.isError && (
+              <p className="text-xs text-red-400" role="alert">
+                {multiCropMutation.error instanceof Error
+                  ? multiCropMutation.error.message
+                  : String(multiCropMutation.error)}
               </p>
             )}
           </div>

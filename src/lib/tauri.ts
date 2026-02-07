@@ -12,6 +12,7 @@ import type {
   ExportByRatingOptions,
   BatchRenameOptions,
   BatchRenameResult,
+  FaceRegion,
 } from "@/types";
 
 /**
@@ -305,5 +306,68 @@ export async function batchRename(
 ): Promise<BatchRenameResult> {
   return invoke<BatchRenameResult>("batch_rename", {
     payload: options,
+  });
+}
+
+// ============ Face Detection ============
+
+export async function detectFaces(imagePath: string): Promise<FaceRegion[]> {
+  return invoke<FaceRegion[]>("detect_faces", {
+    payload: { path: imagePath },
+  });
+}
+
+// ============ Multi-Crop ============
+
+export interface CropRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  suffix: string;
+}
+
+export interface MultiCropPayload {
+  image_path: string;
+  crops: CropRect[];
+  flip_x?: boolean;
+  flip_y?: boolean;
+  rotate_degrees?: number;
+  output_size?: number | null;
+}
+
+export async function multiCrop(payload: MultiCropPayload): Promise<string[]> {
+  return invoke<string[]>("multi_crop", { payload });
+}
+
+// ============ Crop Status Tracking ============
+
+export type CropStatus = "uncropped" | "cropped" | "multi" | "flagged";
+
+export async function setCropStatus(
+  rootPath: string,
+  relativePath: string,
+  status: CropStatus
+): Promise<void> {
+  return invoke<void>("set_crop_status", {
+    payload: {
+      root_path: rootPath,
+      relative_path: relativePath,
+      status,
+    },
+  });
+}
+
+export async function getCropStatuses(
+  rootPath: string
+): Promise<Record<string, CropStatus>> {
+  return invoke<Record<string, CropStatus>>("get_crop_statuses", {
+    payload: { root_path: rootPath },
+  });
+}
+
+export async function clearAllCropStatuses(rootPath: string): Promise<number> {
+  return invoke<number>("clear_all_crop_statuses", {
+    payload: { root_path: rootPath },
   });
 }

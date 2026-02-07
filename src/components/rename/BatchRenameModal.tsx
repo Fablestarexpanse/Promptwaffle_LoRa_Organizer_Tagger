@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { X, FileEdit, Loader2, AlertCircle } from "lucide-react";
 import { useProjectStore } from "@/stores/projectStore";
@@ -6,6 +6,13 @@ import { useProjectImages } from "@/hooks/useProject";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { batchRename } from "@/lib/tauri";
 import type { BatchRenameResult } from "@/types";
+import { listen } from "@tauri-apps/api/event";
+
+interface BatchRenameProgress {
+  current: number;
+  total: number;
+  current_file: string;
+}
 
 interface BatchRenameModalProps {
   isOpen: boolean;
@@ -22,6 +29,9 @@ export function BatchRenameModal({ isOpen, onClose }: BatchRenameModalProps) {
   const [startIndex, setStartIndex] = useState(1);
   const [zeroPad, setZeroPad] = useState(4);
   const [result, setResult] = useState<BatchRenameResult | null>(null);
+  const [progress, setProgress] = useState<BatchRenameProgress | null>(null);
+  const [showProgress, setShowProgress] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
 
   const targetImages =
     selectedIds.size > 0
@@ -30,10 +40,31 @@ export function BatchRenameModal({ isOpen, onClose }: BatchRenameModalProps) {
   const relativePaths = targetImages.map((img) => img.relative_path);
   const count = relativePaths.length;
 
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    const setupListener = async () => {
+      unlisten = await listen<BatchRenameProgress>(
+        "batch-rename-progress",
+        (event) => {
+          setProgress(event.payload);
+        }
+      );
+    };
+
+    setupListener();
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
+
   const renameMutation = useMutation({
     mutationFn: async () => {
       if (!rootPath || relativePaths.length === 0)
         throw new Error("No project or no images");
+      setShowProgress(true);
+      setProgress({ current: 0, total: relativePaths.length, current_file: "" });
       return batchRename({
         root_path: rootPath,
         relative_paths: relativePaths,
@@ -42,11 +73,31 @@ export function BatchRenameModal({ isOpen, onClose }: BatchRenameModalProps) {
         zero_pad: Math.max(1, Math.min(12, zeroPad)),
       });
     },
-    onSuccess: (res) => {
+    onSuccess: async (res) => {
       setResult(res);
+      
+      // Show updating state
+      setIsUpdating(true);
+      
+      // Wait for query refetch to complete before closing progress
       if (res.success && rootPath) {
-        queryClient.invalidateQueries({ queryKey: ["project", "images", rootPath] });
+        // Invalidate and wait for the refetch to complete
+        await queryClient.refetchQueries({ 
+          queryKey: ["project", "images", rootPath],
+          type: 'active'
+        });
+        
+        // Add a small delay to ensure the UI has rendered
+        await new Promise(resolve => setTimeout(resolve, 800));
       }
+      
+      setIsUpdating(false);
+      setShowProgress(false);
+      setProgress(null);
+    },
+    onError: () => {
+      setShowProgress(false);
+      setProgress(null);
     },
   });
 
@@ -60,15 +111,116 @@ export function BatchRenameModal({ isOpen, onClose }: BatchRenameModalProps) {
 
   function handleRename() {
     setResult(null);
+    onClose(); // Close the settings modal immediately
     renameMutation.mutate();
   }
 
   function handleClose() {
     setResult(null);
+    setProgress(null);
+    setShowProgress(false);
+    setIsUpdating(false);
     onClose();
   }
 
-  if (!isOpen) return null;
+  // Always show progress modal if it's active, regardless of isOpen
+  if (!isOpen && !showProgress) return null;
+  
+  // If only progress is showing (modal was closed), just show progress
+  if (!isOpen && showProgress && progress) {
+    const percentage = Math.round((progress.current / progress.total) * 100);
+    
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+        <div className="w-full max-w-md rounded-lg border border-border bg-surface-elevated shadow-xl p-6">
+          <h2 className="mb-4 text-lg font-medium text-gray-100">
+            {isUpdating ? "Updating Grid..." : "Renaming Files..."}
+          </h2>
+          
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-sm text-gray-300">
+              <span>Progress</span>
+              <span className="font-medium">
+                {isUpdating ? (
+                  "Refreshing..."
+                ) : (
+                  `${progress.current} / ${progress.total} (${percentage}%)`
+                )}
+              </span>
+            </div>
+            
+            <div className="h-2 w-full overflow-hidden rounded-full bg-surface">
+              <div
+                className="h-full bg-blue-600 transition-all duration-200"
+                style={{ width: isUpdating ? "100%" : `${percentage}%` }}
+              />
+            </div>
+            
+            {!isUpdating && progress.current_file && (
+              <div className="text-xs text-gray-500 truncate">
+                Current: {progress.current_file}
+              </div>
+            )}
+            
+            {isUpdating && (
+              <div className="flex items-center justify-center gap-2 text-xs text-gray-500">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                <span>Refreshing image grid...</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show progress modal during rename
+  if (showProgress && progress) {
+    const percentage = Math.round((progress.current / progress.total) * 100);
+    
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+        <div className="w-full max-w-md rounded-lg border border-border bg-surface-elevated shadow-xl p-6">
+          <h2 className="mb-4 text-lg font-medium text-gray-100">
+            {isUpdating ? "Updating Grid..." : "Renaming Files..."}
+          </h2>
+          
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-sm text-gray-300">
+              <span>Progress</span>
+              <span className="font-medium">
+                {isUpdating ? (
+                  "Refreshing..."
+                ) : (
+                  `${progress.current} / ${progress.total} (${percentage}%)`
+                )}
+              </span>
+            </div>
+            
+            <div className="h-2 w-full overflow-hidden rounded-full bg-surface">
+              <div
+                className="h-full bg-blue-600 transition-all duration-200"
+                style={{ width: isUpdating ? "100%" : `${percentage}%` }}
+              />
+            </div>
+            
+            {!isUpdating && progress.current_file && (
+              <div className="text-xs text-gray-500 truncate">
+                Current: {progress.current_file}
+              </div>
+            )}
+            
+            {isUpdating && (
+              <div className="flex items-center justify-center gap-2 text-xs text-gray-500">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                <span>Refreshing image grid...</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
