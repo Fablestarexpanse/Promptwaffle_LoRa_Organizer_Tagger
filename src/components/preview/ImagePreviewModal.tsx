@@ -132,6 +132,15 @@ export function ImagePreviewModal({ isOpen, onClose }: ImagePreviewModalProps) {
 
   if (!isOpen || !selectedImage) return null;
 
+  const ratingBorderClass =
+    selectedImage.rating === "good"
+      ? "border-green-500"
+      : selectedImage.rating === "bad"
+        ? "border-red-500"
+        : selectedImage.rating === "needs_edit"
+          ? "border-amber-500"
+          : "border-transparent";
+
   return (
     <div ref={containerRef} className="fixed inset-0 z-50 flex flex-col bg-black">
       {/* Full-size single image view - header */}
@@ -200,7 +209,7 @@ export function ImagePreviewModal({ isOpen, onClose }: ImagePreviewModalProps) {
           <img
             src={imageSrc}
             alt={selectedImage.filename}
-            className="max-h-full max-w-full object-contain transition-transform duration-100"
+            className={`max-h-full max-w-full object-contain transition-transform duration-100 border-4 ${ratingBorderClass}`}
             style={{ transform: `scale(${zoom})` }}
             draggable={false}
           />

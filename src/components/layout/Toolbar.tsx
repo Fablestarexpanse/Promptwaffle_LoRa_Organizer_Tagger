@@ -104,16 +104,16 @@ export function Toolbar() {
           Batch Resize
         </button>
 
-        {/* Clear all tags */}
+        {/* Clear all prompts */}
         <button
           type="button"
           className="flex items-center gap-2 rounded px-3 py-1.5 text-sm font-medium text-gray-200 hover:bg-amber-600/20 hover:text-amber-400 disabled:opacity-50"
-          aria-label="Clear all tags on all images"
+          aria-label="Clear all prompts on all images"
           onClick={() => setShowClearAllTags(true)}
           disabled={!rootPath}
         >
           <Eraser className="h-4 w-4" />
-          Clear All Tags
+          Clear All Prompts
         </button>
 
         {/* Clear all ratings */}

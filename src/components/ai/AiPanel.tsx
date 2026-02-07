@@ -26,6 +26,9 @@ import { buildEffectivePrompt } from "@/lib/promptBuilder";
 
 export function AiPanel() {
   const [previewCaption, setPreviewCaption] = useState<string | null>(null);
+  const [showSaveTemplate, setShowSaveTemplate] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [templateSearch, setTemplateSearch] = useState("");
   const cancelBatchRef = useRef(false);
 
   const queryClient = useQueryClient();
@@ -45,6 +48,8 @@ export function AiPanel() {
     setWordCount,
     setLength,
     setCharacterName,
+    addPromptTemplate,
+    removePromptTemplate,
     lmStudio,
     setLmStudioUrl,
     setLmStudioModel,
@@ -431,27 +436,85 @@ export function AiPanel() {
 
       {/* Prompt template selector */}
       <div className="border-b border-border p-3">
-        <label className="mb-1 block text-xs text-gray-500">Prompt Template</label>
-        <select
-          value={selectedTemplateId}
-          onChange={(e) => {
-            setSelectedTemplateId(e.target.value);
-            const template = promptTemplates.find((t) => t.id === e.target.value);
-            if (template) setCustomPrompt(template.prompt);
-          }}
-          className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-gray-200"
-        >
-          {promptTemplates.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </select>
+        <label className="mb-1 block text-xs text-gray-500">Prompt Template (right-click to delete)</label>
+        <input
+          type="text"
+          value={templateSearch}
+          onChange={(e) => setTemplateSearch(e.target.value)}
+          placeholder="Search templates..."
+          className="w-full mb-2 rounded border border-border bg-surface px-2 py-1 text-xs text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+        />
+        <div className="max-h-40 overflow-y-auto rounded border border-border bg-surface">
+          {promptTemplates.filter((t) => 
+            t.name.toLowerCase().includes(templateSearch.toLowerCase())
+          ).map((t) => {
+            const isSelected = t.id === selectedTemplateId;
+            const isDefault = t.id === "descriptive" || t.id === "straightforward" || t.id === "stable_diffusion" || t.id === "midjourney" || t.id === "danbooru" || t.id === "e621" || t.id === "rule34" || t.id === "booru_like" || t.id === "art_critic" || t.id === "product_listing" || t.id === "social_media";
+            return (
+              <div
+                key={t.id}
+                className={`group flex items-center justify-between px-2 py-1.5 text-sm cursor-pointer hover:bg-white/5 ${
+                  isSelected ? "bg-blue-600/20 text-blue-300" : "text-gray-300"
+                }`}
+                onClick={() => {
+                  setSelectedTemplateId(t.id);
+                  setCustomPrompt(t.prompt);
+                }}
+                onContextMenu={(e) => {
+                  if (isDefault) return;
+                  e.preventDefault();
+                  if (confirm(`Delete template "${t.name}"?`)) {
+                    removePromptTemplate(t.id);
+                    if (isSelected) {
+                      setSelectedTemplateId("descriptive");
+                      setCustomPrompt(promptTemplates.find((pt) => pt.id === "descriptive")?.prompt || "");
+                    }
+                  }
+                }}
+              >
+                <span className="flex-1 truncate">{t.name}</span>
+                {!isDefault && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (confirm(`Delete template "${t.name}"?`)) {
+                        removePromptTemplate(t.id);
+                        if (isSelected) {
+                          setSelectedTemplateId("descriptive");
+                          setCustomPrompt(promptTemplates.find((pt) => pt.id === "descriptive")?.prompt || "");
+                        }
+                      }
+                    }}
+                    className="opacity-0 group-hover:opacity-100 rounded p-0.5 text-gray-500 hover:bg-red-600/20 hover:text-red-400"
+                    title="Delete template"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Custom prompt input */}
       <div className="border-b border-border p-3">
-        <label className="mb-1 block text-xs text-gray-500">Custom Prompt</label>
+        <div className="mb-1 flex items-center justify-between">
+          <label className="text-xs text-gray-500">Custom Prompt</label>
+          <button
+            type="button"
+            onClick={() => {
+              setTemplateName("");
+              setShowSaveTemplate(true);
+            }}
+            disabled={!customPrompt.trim()}
+            className="rounded bg-blue-600 px-2 py-0.5 text-xs text-white hover:bg-blue-500 disabled:opacity-50"
+            title="Save current prompt as a new template"
+          >
+            Save as Template
+          </button>
+        </div>
         <textarea
           value={customPrompt}
           onChange={(e) => setCustomPrompt(e.target.value)}
@@ -651,6 +714,79 @@ export function AiPanel() {
           <p className="text-xs text-gray-500">
             Start Ollama, pull a vision model (e.g. llava), then click Test above
           </p>
+        </div>
+      )}
+
+      {/* Save Template Modal */}
+      {showSaveTemplate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div className="w-full max-w-md rounded-lg border border-border bg-surface-elevated shadow-xl">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <h2 className="text-lg font-medium text-gray-100">Save Prompt Template</h2>
+              <button
+                type="button"
+                onClick={() => setShowSaveTemplate(false)}
+                className="rounded p-1 text-gray-400 hover:bg-white/10 hover:text-gray-200"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-4 p-4">
+              <div>
+                <label className="mb-1 block text-sm text-gray-300">Template Name</label>
+                <input
+                  type="text"
+                  value={templateName}
+                  onChange={(e) => setTemplateName(e.target.value)}
+                  placeholder="My Custom Prompt"
+                  autoFocus
+                  className="w-full rounded border border-border bg-surface px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && templateName.trim()) {
+                      const newTemplate = {
+                        id: `custom_${Date.now()}`,
+                        name: templateName.trim(),
+                        prompt: customPrompt.trim() || "Describe this image.",
+                        provider,
+                      };
+                      addPromptTemplate(newTemplate);
+                      setSelectedTemplateId(newTemplate.id);
+                      setShowSaveTemplate(false);
+                    }
+                    if (e.key === "Escape") setShowSaveTemplate(false);
+                  }}
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-border px-4 py-3">
+              <button
+                type="button"
+                onClick={() => setShowSaveTemplate(false)}
+                className="rounded px-3 py-1.5 text-sm text-gray-300 hover:bg-white/10"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!templateName.trim()) return;
+                  const newTemplate = {
+                    id: `custom_${Date.now()}`,
+                    name: templateName.trim(),
+                    prompt: customPrompt.trim() || "Describe this image.",
+                    provider,
+                  };
+                  addPromptTemplate(newTemplate);
+                  setSelectedTemplateId(newTemplate.id);
+                  setShowSaveTemplate(false);
+                }}
+                disabled={!templateName.trim()}
+                className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+              >
+                Save
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

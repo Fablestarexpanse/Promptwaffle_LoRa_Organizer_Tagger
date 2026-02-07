@@ -486,7 +486,7 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
           }}
           disabled={generateCaptionMutation.isPending}
           className="rounded p-0.5 text-gray-500 hover:bg-purple-600/20 hover:text-purple-400 disabled:opacity-30"
-          title="Generate caption for this image"
+          title="Generate prompt for this image"
         >
           {generateCaptionMutation.isPending ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -516,7 +516,7 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
           onClick={handleClearTagsClick}
           disabled={writeMutation.isPending}
           className="rounded p-0.5 text-gray-500 hover:bg-amber-600/20 hover:text-amber-400 disabled:opacity-30"
-          title="Clear all tags for this image"
+          title="Clear all prompts for this image"
         >
           <Eraser className="h-3.5 w-3.5" />
         </button>
@@ -603,7 +603,7 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
                 className="flex items-center gap-2 text-lg font-medium text-gray-100"
               >
                 <Eraser className="h-5 w-5 text-amber-400" />
-                Clear all tags?
+                Clear all prompts?
               </h2>
               <button
                 type="button"
@@ -708,10 +708,10 @@ export function ThumbnailCell({ entry, size, index, isInCaptionBatch = false }: 
                 <span className="text-blue-400">{addTagPreviewText.trim()}</span>
               )
             ) : displayText ? (
-              triggerWord.trim() ? (
-                highlightTriggerWord(displayText, triggerWord.trim())
-              ) : searchHighlightText.trim() ? (
+              searchHighlightText.trim() ? (
                 highlightMatches(displayText, searchHighlightText)
+              ) : triggerWord.trim() ? (
+                highlightTriggerWord(displayText, triggerWord.trim())
               ) : (
                 displayText
               )

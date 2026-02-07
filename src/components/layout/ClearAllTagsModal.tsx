@@ -72,7 +72,7 @@ export function ClearAllTagsModal({ isOpen, onClose }: ClearAllTagsModalProps) {
             className="flex items-center gap-2 text-lg font-medium text-gray-100"
           >
             <Eraser className="h-5 w-5 text-amber-400" />
-            Clear all tags on all images
+            Clear all prompts on all images
           </h2>
           <button
             type="button"
@@ -86,9 +86,9 @@ export function ClearAllTagsModal({ isOpen, onClose }: ClearAllTagsModalProps) {
         </div>
         <div className="space-y-4 p-4">
           <p className="text-sm text-gray-400">
-            This will remove tags from every image in the current folder (
-            {images.length} image{images.length === 1 ? "" : "s"}). This cannot be
-            undone.
+            This will remove prompts (captions) from every image in the current
+            folder ({images.length} image{images.length === 1 ? "" : "s"}). This
+            cannot be undone.
           </p>
           <p className="text-sm text-gray-300">
             Type <strong className="text-amber-400">{CONFIRM_WORD}</strong> below
@@ -125,7 +125,7 @@ export function ClearAllTagsModal({ isOpen, onClose }: ClearAllTagsModalProps) {
               ) : (
                 <Eraser className="h-4 w-4" />
               )}
-              Clear all tags
+              Clear all prompts
             </button>
           </div>
         </div>
