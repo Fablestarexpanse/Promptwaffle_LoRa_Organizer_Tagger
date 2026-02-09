@@ -58,3 +58,9 @@ venv/
 
 # Archived documentation (internal dev notes)
 docs/archive/
+
+# Internal development documentation
+CROP_TOOL_IMPLEMENTATION.md
+PERFORMANCE_OPTIMIZATIONS.md
+*_IMPLEMENTATION.md
+*_NOTES.md
